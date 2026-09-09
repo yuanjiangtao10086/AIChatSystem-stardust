@@ -1,0 +1,43 @@
+[project]
+name = "stardust-ai"
+version = "0.1.0"
+description = "Internal AI provider service for Stardust"
+authors = [
+    {name = "yuanjiangtao10086",email = "3497698049@qq.com"}
+]
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "uvicorn==0.52.4",
+]
+
+[project.scripts]
+stardust-ai = "app.main:run"
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.6",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [{include = "app"}]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

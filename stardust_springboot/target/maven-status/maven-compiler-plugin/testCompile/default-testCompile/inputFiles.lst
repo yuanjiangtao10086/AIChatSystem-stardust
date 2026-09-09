@@ -1,0 +1,15 @@
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\admin\AdminIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\ai\AiStreamingIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\ai\JdkHttpAiGatewayTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\auth\AuthenticationIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\auth\JwtTokenServiceTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\common\CommonInfrastructureTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\common\PublicIdGeneratorTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\common\RequestIdFilterTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\conversation\ConversationIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\conversation\ConversationShortMemoryIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\file\UserFileIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\knowledge\KnowledgeRagIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\memory\MemoryIntegrationTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\persistence\PersistenceInfrastructureTests.java
+E:\daxuexuexiziliao\keshe\AiChatSystem\stardust_springboot\src\test\java\com\example\stardust_springboot\StardustSpringbootApplicationTests.java
