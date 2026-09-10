@@ -1,9 +1,9 @@
 # AI Chat SaaS 数据库设计
 
-> 状态：阶段 1 核心表 V1、阶段 2 认证表 V2、阶段 3 消息字段 V3、阶段 5 request log V4、阶段 7 文件 V5、阶段 8 短记忆 V6、阶段 9 长期记忆 V7、阶段 10 RAG V8 已落地  
+> 状态：阶段 1 核心表 V1、阶段 2 认证表 V2、阶段 3 消息字段 V3、阶段 5 request log V4、阶段 7 文件 V5、阶段 8 短记忆 V6、阶段 9 长期记忆 V7、阶段 10 RAG V8、阶段 11 审计 V9、阶段 12 AI 用量 V10 已落地  
 > 目标关系库：MySQL 8.x；自动化测试使用 H2 MySQL compatibility mode，生产前仍需在实际 MySQL 小版本验证
 
-阶段 4 仅建设无状态 Python AI Service，没有新增表。阶段 10 新增 V8 Knowledge/RAG 业务事实；Python 仍不连接业务 MySQL。AI usage ledger 与 Audit 继续延后。
+阶段 4 仅建设无状态 Python AI Service，没有新增表。阶段 10 新增 V8 Knowledge/RAG 业务事实；Python 仍不连接业务 MySQL。阶段 11 新增 V9 管理员审计，阶段 12 新增 V10 AI 用量账户与不可变 ledger；价格历史增强仍延后。
 
 ## 0. 阶段 1 实施结果
 
@@ -289,9 +289,11 @@ VectorStore metadata 至少包含 `userId/knowledgeBaseId/documentId/chunkIndex`
 
 ### 9.2 `ai_model`
 
-字段：`id`, `public_id`, `provider_id`, `code`, `external_model_id`, `display_name`, `model_type`, `capabilities_json`, `context_window`, `max_output_tokens`, `input_price`, `output_price`, `currency`, `price_effective_from`, `parameter_policy_json`, `status`, `sort_order`, timestamps, `version`。
+字段：`id`, `public_id`, `provider_id`, `code`, `external_model_id`, `display_name`, `model_type`, `capabilities_json`, `context_window`, `max_output_tokens`, `input_price`, `output_price`, `currency`, `price_effective_from`, `parameter_policy_json`, `status`, `sort_order`, `is_default`, timestamps, `version`。
 
-约束：`UNIQUE(provider_id, external_model_id)`、`UNIQUE(code)`、`INDEX(status, model_type, sort_order)`。当前价带 `price_effective_from`，每次请求复制价格快照；若需要查询完整调价历史，后续增加带 `effective_from/effective_to` 的 `ai_model_price` 版本表，不覆盖历史计费依据。
+约束：`UNIQUE(provider_id, external_model_id)`、`UNIQUE(code)`、`INDEX(status, model_type, sort_order)`、`INDEX(is_default)`。当前价带 `price_effective_from`，每次请求复制价格快照；若需要查询完整调价历史，后续增加带 `effective_from/effective_to` 的 `ai_model_price` 版本表，不覆盖历史计费依据。
+
+阶段 11E 新增 `V11__extend_ai_catalog.sql`：`ai_model.is_default BOOLEAN NOT NULL DEFAULT FALSE` 与 `idx_ai_model_default`。`is_default` 在同一 `model_type` 内最多一个为真（由 `AdminAiService.modelDefault` 在事务内先清除同类型旧默认再置位；停用模型同时清除该标记），数据库不额外加唯一约束以避免跨行更新顺序问题。`capabilities_json` 与 `parameter_policy_json` 的读写统一由 `AiCatalogJsonCodec` 承担：写入结构为 `{streaming,vision,reasoning,embedding}` 与 `{defaultTemperature,defaultTopP,defaultMaxOutputTokens}`，读取兼容历史上的数组式与嵌套式形状；`ai_provider.non_secret_config_json` 存 `{timeoutSeconds,connectTimeoutSeconds}`。**`credential_ref` 始终只存引用**（`env:NAME`/`vault:…`），明文密钥既不落库也不进入审计（ADR-061）。
 
 ### 9.3 `ai_request_log`
 
@@ -313,12 +315,20 @@ VectorStore metadata 至少包含 `userId/knowledgeBaseId/documentId/chunkIndex`
 
 生成幂等暂复用 `chat_message` 已存在的 `UNIQUE(user_id, client_request_id)`；重复 key 返回冲突而不是重放。`trace_id`、价格/cost、provider request id、first-token latency 与通用幂等响应快照在实际需求阶段通过新 migration 添加，不把目标字段误写成当前事实。
 
-### 9.4 `ai_usage_account`, `ai_usage_ledger`
+### 9.4 `ai_usage_account`, `ai_usage_ledger`（阶段 12 第一批已落地）
 
-- `ai_usage_account`：`user_id`（PK/FK）, `quota_tokens`, `used_tokens`, `reserved_tokens`, `quota_cost`, `used_cost`, `reserved_cost`, `currency`, `period_start`, `period_end`, `version`, `updated_at`。首版平台结算币种统一，账户周期内不得改变币种。
-- `ai_usage_ledger`：`id`, `public_id`, `user_id`, `ai_request_id`, `operation_key`, `entry_type`, `token_delta`, `cost_delta`, `currency`, `expires_at`, `created_at`。
+- `ai_usage_account`：`user_id`（PK/FK）, `quota_tokens`, `used_tokens`, `reserved_tokens`, `quota_cost`, `used_cost`, `reserved_cost`, `currency`, `period_start`, `period_end`, `updated_at`, `version`。首版平台结算币种统一，账户周期内不得改变币种。
+- `ai_usage_ledger`：`id`, `public_id`, `user_id`, `ai_request_id`, `operation_key`, `entry_type`, `token_delta`, `cost_delta`, `currency`, `created_at`, `updated_at`, `version`。
 
-`entry_type` 至少为 `RESERVE`, `SETTLE`, `RELEASE`, `ADJUST`。使用 `UNIQUE(ai_request_id, operation_key)` 保证每个业务动作幂等，允许不同 `operation_key` 的多次人工 adjustment；`INDEX(user_id, created_at, id)` 支持对账。Ledger 行插入后不可更新/删除，后续变化只能追加反向/调整条目。Account 是并发快速余额，Ledger 是不可变对账事实；二者在本地事务中原子更新，悬挂 reservation 由恢复任务追加 RELEASE 并释放账户 reservation。
+`entry_type` 至少为 `RESERVE`, `SETTLE`, `RELEASE`, `ADJUST`；`operation_key` 使用 `RESERVE/SETTLE/RELEASE` 三个稳定值。`UNIQUE(ai_request_id, operation_key)` 保证每个业务动作幂等，允许不同 `operation_key` 的多次人工 adjustment；`INDEX(user_id, created_at, id)` 支持对账，`INDEX(ai_request_id)` 支持按请求追踪。
+
+`token_delta/cost_delta` 统一表示「已承诺用量（`used + reserved`）的增量」，`sum(delta) == used + reserved` 恒成立：`RESERVE` 为正，`SETTLE` 为「真实用量 − 预留」（可负，表示退回差额），`RELEASE` 为预留的相反数。语义与生命周期见 ADR-051。
+
+Ledger 在代码层只提供 `save` 与查询方法，不提供 update/delete；后续变化只能追加反向/调整条目。Account 是并发快速余额，Ledger 是不可变对账事实；二者在本地事务中原子更新，悬挂 reservation 由启动恢复扫描 interrupted request 追加 RELEASE 释放。首版不引入 `expires_at`：`AI_REQUEST_LOG` 状态是悬挂预留的事实依据，周期对账阶段再评估是否需要基于时间的清扫索引。
+
+CHECK 约束保证所有计数非负、`used + reserved <= quota`（token 与 cost 各一条）且 `period_end > period_start`；周期到期后由访问路径惰性滚动重置，历史事实只由 ledger 保留。
+
+`ADJUST` 行的 `ai_request_id` 为 NULL，因此不参与 `UNIQUE(ai_request_id, operation_key)`，幂等由调用方保证唯一的 `operation_key`（`ADJUST:<ULID>`）承担；`AiUsageLedgerRepository` 不提供 update/delete。周期对账以 `ai_request_log` 终态为事实清扫悬挂 `RESERVE`，并比对账户 `used + reserved` 与 `period_start` 之后的 ledger 求和，漂移只告警不自动改写（ADR-053）。
 
 ### 9.5 `idempotency_record`（跨业务通用）
 
@@ -358,6 +368,9 @@ VectorStore metadata 至少包含 `userId/knowledgeBaseId/documentId/chunkIndex`
 | 10（已完成） | V8 `knowledge_base`, `knowledge_document`, `document_chunk`, `conversation_knowledge_base` |
 | 8（已完成） | V6 `conversation_summary` |
 | 9（已完成） | V7 `user_memory`；不创建 RAG/向量表 |
-| 后续 Admin/Usage | `admin_audit_log`, `ai_usage_account`, `ai_usage_ledger` 及价格历史增强 |
+| 11（已完成） | V9 `admin_audit_log` |
+| 12 第一批（已完成） | V10 `ai_usage_account`, `ai_usage_ledger`；价格历史增强仍延后 |
+| 11E（已完成） | V11 扩展 `ai_model.is_default` + `idx_ai_model_default`，支撑平台默认模型 |
+| 11F（已完成） | V12 仅增索引：`ai_request_log(created_at, id)` 与 `admin_audit_log(created_at, id)`，支撑日志时间区间筛选（不新增表） |
 
 每个 migration 必须同时有 Repository 集成测试和关键索引查询验证。建议基线为 MySQL 8.4 LTS、`utf8mb4` 与明确排序规则（普通文本候选 `utf8mb4_0900_ai_ci`，ID/code/hash 使用 ASCII/binary collation）；实际 DDL 前必须以部署环境验证并锁定小版本、排序规则、ULID 生成、软删除唯一约束和数据保留政策。

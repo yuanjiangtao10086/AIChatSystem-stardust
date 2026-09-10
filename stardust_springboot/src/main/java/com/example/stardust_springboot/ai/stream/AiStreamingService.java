@@ -19,7 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -94,6 +96,9 @@ public class AiStreamingService {
 
     private void run(PreparedAiStream stream, SseEmitter emitter, StreamCancellation cancellation,
                      Future<?> watchdog) {
+        long startNanos = System.nanoTime();
+        long[] firstDeltaNanos = {-1};
+        long[] pythonStartNanos = {-1};
         StringBuilder content = new StringBuilder();
         MutableUsage usage = new MutableUsage();
         MutableFinish finish = new MutableFinish();
@@ -102,15 +107,27 @@ public class AiStreamingService {
             log.info("AI stream started requestId={} userId={} conversationId={} provider={} model={}",
                     stream.requestId(), stream.userId(), stream.conversationId(),
                     stream.providerKey(), stream.externalModelId());
+            // Deliver start before context building so the client enters the "generating" state
+            // immediately instead of staring at a blank screen while Memory/RAG retrieval runs.
             send(emitter, "start", baseEvent(stream, "start", Map.of(
                     "userMessageId", stream.userMessageId(),
                     "modelId", stream.modelId(),
-                    "operation", stream.operation())) , cancellation);
+                    "operation", stream.operation())), cancellation);
 
+            // Runs on the streaming worker, after the SSE response is already open. The conversation
+            // FOR UPDATE lock from prepare() is long released; remote RAG embedding latency no longer
+            // blocks the HTTP response or other conversations.
+            List<AiGatewayRequest.AiGatewayMessage> context = persistence.buildContext(stream);
+            long contextMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+            log.info("AI stream context built requestId={} contextMs={} messageCount={}",
+                    stream.requestId(), contextMs, context.size());
+
+            pythonStartNanos[0] = System.nanoTime();
             AiGatewayRequest gatewayRequest = new AiGatewayRequest(stream.requestId(),
-                    stream.providerKey(), stream.externalModelId(), stream.messages());
+                    stream.providerKey(), stream.externalModelId(), context);
             gateway.stream(gatewayRequest, cancellation,
-                    event -> handleGatewayEvent(stream, emitter, cancellation, content, usage, finish, event));
+                    event -> handleGatewayEvent(stream, emitter, cancellation, content, usage, finish,
+                            firstDeltaNanos, pythonStartNanos, startNanos, event));
 
             if (cancellation.isTimedOut()) {
                 throw new AiGatewayException("AI_TIMEOUT", "AI request timed out", true);
@@ -166,7 +183,7 @@ public class AiStreamingService {
 
     private void runWatchdog(StreamCancellation cancellation) {
         try {
-            Thread.sleep(properties.requestTimeout());
+            Thread.sleep(properties.requestTimeout().toMillis());
             cancellation.timeout();
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
@@ -175,11 +192,20 @@ public class AiStreamingService {
 
     private void handleGatewayEvent(PreparedAiStream stream, SseEmitter emitter,
                                     StreamCancellation cancellation, StringBuilder content,
-                                    MutableUsage usage, MutableFinish finish, AiGatewayEvent event) {
+                                    MutableUsage usage, MutableFinish finish, long[] firstDeltaNanos,
+                                    long[] pythonStartNanos, long startNanos, AiGatewayEvent event) {
         switch (event.type()) {
             case "start" -> { }
             case "delta" -> {
                 String delta = text(event.payload(), "content");
+                if (!delta.isEmpty() && firstDeltaNanos[0] < 0) {
+                    firstDeltaNanos[0] = System.nanoTime();
+                    long springPreprocessMs = Duration.ofNanos(pythonStartNanos[0] - startNanos).toMillis();
+                    long pythonTtftMs = Duration.ofNanos(firstDeltaNanos[0] - pythonStartNanos[0]).toMillis();
+                    long totalTtftMs = Duration.ofNanos(firstDeltaNanos[0] - startNanos).toMillis();
+                    log.info("AI stream first token requestId={} springPreprocessMs={} pythonTtftMs={} totalTtftMs={}",
+                            stream.requestId(), springPreprocessMs, pythonTtftMs, totalTtftMs);
+                }
                 content.append(delta);
                 send(emitter, "delta", baseEvent(stream, "delta", Map.of("content", delta)), cancellation);
             }
@@ -190,6 +216,7 @@ public class AiStreamingService {
                 send(emitter, "usage", baseEvent(stream, "usage", usage.asMap()), cancellation);
             }
             case "done" -> finish.update(event.payload());
+            case "error" -> send(emitter, "error", baseEvent(stream, "error", event.payload()), cancellation);
             case "citation", "tool_start", "tool_delta", "tool_done" ->
                     send(emitter, event.type(), baseEvent(stream, event.type(), event.payload()), cancellation);
             default -> throw new AiGatewayException("AI_PROTOCOL_ERROR", "Unexpected stream event", false);

@@ -1,6 +1,7 @@
 package com.example.stardust_springboot.ai.entity;
 
 import com.example.stardust_springboot.common.persistence.PublicIdEntity;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -74,6 +75,14 @@ public class AiProvider extends PublicIdEntity {
     public ProviderType getProviderType() { return providerType; }
     public String getBaseUrl() { return baseUrl; }
     public boolean hasCredential() { return credentialRef != null && !credentialRef.isBlank(); }
+
+    /**
+     * Secret <em>reference</em> (never the secret itself), read only so the console can mask the
+     * deployed value. {@code @JsonIgnore} makes it impossible for an entity to leak the reference
+     * even if it were ever serialized directly; the reference is also never audited (ADR-016).
+     */
+    @JsonIgnore
+    public String getCredentialRef() { return credentialRef; }
     public String getNonSecretConfigJson() { return nonSecretConfigJson; }
     public ProviderHealthStatus getHealthStatus() { return healthStatus; }
     public Instant getLastHealthCheckedAt() { return lastHealthCheckedAt; }

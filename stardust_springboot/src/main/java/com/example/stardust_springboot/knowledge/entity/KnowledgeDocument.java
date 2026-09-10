@@ -98,6 +98,11 @@ public class KnowledgeDocument extends SoftDeleteEntity {
         completedAt = null;
     }
 
+    /** Keeps {@code chunk_count} aligned with the actual chunk rows after a vector wipe. */
+    public void clearChunks() {
+        chunkCount = 0;
+    }
+
     public void softDelete() {
         markDeletedAt(Instant.now());
     }

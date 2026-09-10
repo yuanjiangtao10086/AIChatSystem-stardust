@@ -26,8 +26,11 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
             where (:search is null or lower(user.emailNormalized) like lower(concat('%', :search, '%'))
                 or lower(user.displayName) like lower(concat('%', :search, '%')))
               and (:status is null or user.status = :status)
+              and (:role is null or exists (select 1 from UserRole ur
+                    join ur.role role where ur.user.id = user.id and role.code = :role))
             """)
     Page<AppUser> findAdmin(@Param("search") String search,
                             @Param("status") com.example.stardust_springboot.user.entity.UserStatus status,
+                            @Param("role") String role,
                             Pageable pageable);
 }

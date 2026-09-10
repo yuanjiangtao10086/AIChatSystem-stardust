@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
+import java.time.Instant;
 
 @Service
 public class ConversationService {
@@ -82,6 +83,19 @@ public class ConversationService {
         Conversation conversation = requireOwned(conversationId, principal.id());
         conversation.softDelete();
         conversationRepository.saveAndFlush(conversation);
+    }
+
+    /**
+     * Soft-deletes every conversation owned by the user that has no messages yet (messageCount == 0),
+     * except the one identified by {@code keepId}. Used to prune the empty "New conversation" rows a
+     * user leaves behind by clicking "开启新对话" without ever sending a message. Conversations that
+     * already contain a user message are never touched.
+     *
+     * @return number of conversations removed
+     */
+    @Transactional
+    public int deleteEmptyConversations(AuthenticatedUser principal, String keepId) {
+        return conversationRepository.softDeleteEmptyOwned(principal.id(), keepId, Instant.now());
     }
 
     private Conversation requireOwned(String conversationId, Long userId) {

@@ -38,3 +38,20 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Build output / IDE output ###
+out/
+bin/
+
+### Java build artifacts ###
+*.class
+*.jar
+*.war
+*.dumpstream
+HELP.md
+
+### Logs ###
+*.log
+logs/
+*.dumpstream
+.attach_pid*

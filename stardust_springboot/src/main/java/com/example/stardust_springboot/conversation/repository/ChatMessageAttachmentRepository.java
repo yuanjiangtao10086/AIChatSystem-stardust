@@ -10,6 +10,7 @@ import java.util.List;
 
 public interface ChatMessageAttachmentRepository extends JpaRepository<ChatMessageAttachment, Long> {
     boolean existsByUserFileId(Long userFileId);
+    long countByUserFileId(Long userFileId);
 
     @Query("""
             select attachment from ChatMessageAttachment attachment

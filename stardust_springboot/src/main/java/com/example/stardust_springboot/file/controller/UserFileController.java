@@ -3,11 +3,13 @@ package com.example.stardust_springboot.file.controller;
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.common.api.ApiResult;
 import com.example.stardust_springboot.common.api.PageResult;
+import com.example.stardust_springboot.common.web.ClientIpResolver;
 import com.example.stardust_springboot.file.dto.FileView;
 import com.example.stardust_springboot.file.dto.RenameFileRequest;
 import com.example.stardust_springboot.file.dto.StorageUsageView;
 import com.example.stardust_springboot.file.service.FileDownload;
 import com.example.stardust_springboot.file.service.UserFileService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -39,17 +41,20 @@ import java.nio.charset.StandardCharsets;
 @RequestMapping("/api/v1/files")
 public class UserFileController {
     private final UserFileService fileService;
+    private final ClientIpResolver clientIpResolver;
 
-    public UserFileController(UserFileService fileService) {
+    public UserFileController(UserFileService fileService, ClientIpResolver clientIpResolver) {
         this.fileService = fileService;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResult<FileView>> upload(
             @AuthenticationPrincipal AuthenticatedUser principal,
-            @RequestPart("file") MultipartFile file) {
+            @RequestPart("file") MultipartFile file,
+            HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResult.success(fileService.upload(principal, file)));
+                .body(ApiResult.success(fileService.upload(principal, file, clientIpResolver.resolve(request))));
     }
 
     @GetMapping

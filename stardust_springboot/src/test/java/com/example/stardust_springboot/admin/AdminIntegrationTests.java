@@ -65,16 +65,19 @@ class AdminIntegrationTests {
         mvc.perform(get("/api/v1/admin/conversations/{id}/messages",conversationId)
                         .header("Authorization",bearer(admin.token())))
                 .andExpect(status().isOk());
-        assertThat(audits.findAll()).anyMatch(log -> log.getAction()==AdminAuditAction.CONVERSATION_VIEW
+        assertThat(audits.findAll()).anyMatch(log -> log.getAction()==AdminAuditAction.VIEW_CHAT_MESSAGES
                 && conversationId.equals(log.getTargetResourceId()) && log.getRequestId()!=null);
 
         String secretRef="vault:phase11-"+UUID.randomUUID();
         mvc.perform(post("/api/v1/admin/ai/providers").header("Authorization",bearer(admin.token()))
                         .contentType(MediaType.APPLICATION_JSON).content("""
                         {"code":"phase11-provider","displayName":"Phase 11","type":"OPENAI_COMPATIBLE",
-                         "baseUrl":"https://example.invalid/v1","credentialRef":"%s","configJson":"{}"}
+                         "baseUrl":"https://example.invalid/v1","credentialRef":"%s","timeoutSeconds":60}
                         """.formatted(secretRef)))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.credentialConfigured").value(true))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.hasApiKey").value(true))
+                .andExpect(jsonPath("$.data.timeoutSeconds").value(60))
+                // a Vault reference is configured but cannot be resolved by this process: no mask
+                .andExpect(jsonPath("$.data.maskedApiKey").doesNotExist())
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(secretRef))));
         mvc.perform(get("/api/v1/admin/ai/providers").header("Authorization",bearer(admin.token())))
                 .andExpect(status().isOk())

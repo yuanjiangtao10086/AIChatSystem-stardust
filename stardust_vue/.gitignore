@@ -1,0 +1,54 @@
+.DS_Store
+node_modules
+/dist
+
+
+# local env files
+.env.local
+.env.*.local
+
+# dependencies
+node_modules/
+.pnpm-store/
+.npmcache/
+.yarn/cache
+
+# builds
+/dist
+dist/
+/dist-ssr
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+*.err
+
+# local env files
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+
+# coverage
+coverage/
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+Thumbs.db
+desktop.ini

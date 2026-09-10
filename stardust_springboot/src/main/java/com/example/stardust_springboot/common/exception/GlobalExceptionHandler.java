@@ -2,6 +2,8 @@ package com.example.stardust_springboot.common.exception;
 
 import com.example.stardust_springboot.common.api.ApiResult;
 import com.example.stardust_springboot.common.api.ValidationError;
+import com.example.stardust_springboot.common.logging.RequestContext;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,9 +69,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResult.error(ErrorCode.MALFORMED_REQUEST));
     }
 
+    /**
+     * A persistence failure is the hardest class of error to diagnose from a client report, so the
+     * server log gets the endpoint, the request id and the deepest cause. The client only ever sees
+     * the generic {@code 50002} envelope — database details never leave the server.
+     */
     @ExceptionHandler(DataAccessException.class)
-    public ResponseEntity<ApiResult<Void>> handlePersistenceException(DataAccessException exception) {
-        log.error("Persistence request failed: exceptionType={}", exception.getClass().getName(), exception);
+    public ResponseEntity<ApiResult<Void>> handlePersistenceException(DataAccessException exception,
+                                                                     HttpServletRequest request) {
+        Throwable root = exception;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        log.error("Persistence request failed: method={} uri={} requestId={} exceptionType={} rootType={} rootMessage={}",
+                request.getMethod(), request.getRequestURI(), RequestContext.requestId(),
+                exception.getClass().getName(), root.getClass().getName(), root.getMessage(), exception);
         return ResponseEntity.status(ErrorCode.PERSISTENCE_ERROR.httpStatus())
                 .body(ApiResult.error(ErrorCode.PERSISTENCE_ERROR));
     }

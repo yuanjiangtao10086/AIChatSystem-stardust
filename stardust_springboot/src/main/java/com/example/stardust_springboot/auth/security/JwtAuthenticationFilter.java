@@ -1,19 +1,22 @@
 package com.example.stardust_springboot.auth.security;
 
+import com.example.stardust_springboot.common.exception.ErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.filter.GenericFilterBean;
 
 import java.io.IOException;
 
 @Component
-public class JwtAuthenticationFilter extends OncePerRequestFilter {
+public class JwtAuthenticationFilter extends GenericFilterBean {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
@@ -30,8 +33,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+    public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse,
+                         FilterChain filterChain) throws ServletException, IOException {
+        HttpServletRequest request = (HttpServletRequest) servletRequest;
+        HttpServletResponse response = (HttpServletResponse) servletResponse;
         String authorization = request.getHeader("Authorization");
         if (authorization == null || authorization.isBlank()) {
             filterChain.doFilter(request, response);
@@ -39,7 +44,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         if (!authorization.startsWith(BEARER_PREFIX)) {
             authenticationEntryPoint.commence(request, response,
-                    new ApiAuthenticationException(com.example.stardust_springboot.common.exception.ErrorCode.TOKEN_INVALID));
+                    new ApiAuthenticationException(ErrorCode.TOKEN_INVALID));
             return;
         }
 
@@ -48,8 +53,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     authorization.substring(BEARER_PREFIX.length()));
             AuthenticatedUser user = userSecurityService.loadActiveUser(claims.subject());
             if (user.authVersion() != claims.authVersion()) {
-                throw new ApiAuthenticationException(
-                        com.example.stardust_springboot.common.exception.ErrorCode.TOKEN_INVALID);
+                throw new ApiAuthenticationException(ErrorCode.TOKEN_INVALID);
             }
             var authorities = user.roles().stream()
                     .map(role -> new SimpleGrantedAuthority("ROLE_" + role))

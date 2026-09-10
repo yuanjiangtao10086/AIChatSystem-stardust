@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 
 public interface UserFileRepository extends JpaRepository<UserFile, Long> {
     Optional<UserFile> findByPublicIdAndUserIdAndStatusAndDeletedAtIsNull(
@@ -49,10 +50,26 @@ public interface UserFileRepository extends JpaRepository<UserFile, Long> {
               and (:mime is null or lower(file.detectedMime) like lower(concat(:mime, '%')))
               and (:status is null or file.status = :status)
               and (:search is null or lower(file.originalName) like lower(concat('%', :search, '%')))
+              and (:userSearch is null or lower(file.user.displayName) like lower(concat('%', :userSearch, '%')) or lower(file.user.emailNormalized) like lower(concat('%', :userSearch, '%')))
+              and (:minSize is null or file.sizeBytes >= :minSize)
+              and (:maxSize is null or file.sizeBytes <= :maxSize)
+              and (:from is null or file.createdAt >= :from)
+              and (:to is null or file.createdAt < :to)
+              and (:hideSuperAdminOwned = false or not exists (
+                    select ur.id from UserRole ur
+                    where ur.user = file.user
+                      and ur.role.code = 'SUPER_ADMIN'
+                      and ur.role.status = com.example.stardust_springboot.user.entity.RoleStatus.ENABLED))
             """)
     Page<UserFile> findAdmin(@Param("userId") String userId,
                              @Param("mime") String mime,
                              @Param("status") UserFileStatus status,
                              @Param("search") String search,
+                             @Param("userSearch") String userSearch,
+                             @Param("minSize") Long minSize,
+                             @Param("maxSize") Long maxSize,
+                             @Param("from") Instant from,
+                             @Param("to") Instant to,
+                             @Param("hideSuperAdminOwned") boolean hideSuperAdminOwned,
                              Pageable pageable);
 }

@@ -8,11 +8,13 @@ import com.example.stardust_springboot.auth.service.RefreshTokenService;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.common.exception.BusinessException;
 import com.example.stardust_springboot.common.exception.ErrorCode;
+import com.example.stardust_springboot.common.id.PublicIdGenerator;
 import com.example.stardust_springboot.config.StorageProperties;
 import com.example.stardust_springboot.file.entity.UserStorageUsage;
 import com.example.stardust_springboot.file.repository.UserStorageUsageRepository;
 import com.example.stardust_springboot.user.entity.*;
 import com.example.stardust_springboot.user.repository.*;
+import com.example.stardust_springboot.usage.service.AiUsageService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -29,6 +31,7 @@ public class AdminUserService {
     private final RoleRepository roles;
     private final UserRoleRepository userRoles;
     private final UserStorageUsageRepository storage;
+    private final AiUsageService usage;
     private final AiRequestLogRepository requests;
     private final PasswordEncoder passwords;
     private final RefreshTokenService refreshTokens;
@@ -38,25 +41,31 @@ public class AdminUserService {
     private final long defaultQuota;
 
     public AdminUserService(AppUserRepository users, RoleRepository roles, UserRoleRepository userRoles,
-                            UserStorageUsageRepository storage, AiRequestLogRepository requests,
+                            UserStorageUsageRepository storage, AiUsageService usage,
+                            AiRequestLogRepository requests,
                             PasswordEncoder passwords, RefreshTokenService refreshTokens,
                             AdminAuthorizationService authorization, AdminAuditService audit,
                             StorageProperties properties, Clock clock) {
         this.users=users; this.roles=roles; this.userRoles=userRoles; this.storage=storage;
-        this.requests=requests; this.passwords=passwords; this.refreshTokens=refreshTokens;
+        this.usage=usage; this.requests=requests; this.passwords=passwords; this.refreshTokens=refreshTokens;
         this.authorization=authorization; this.audit=audit; this.clock=clock;
         this.defaultQuota=properties.defaultQuotaBytes();
     }
 
     @Transactional(readOnly=true)
-    public PageResult<AdminDtos.UserView> list(int page, int size, String search, UserStatus status) {
-        return PageResult.from(users.findAdmin(normalizeBlank(search), status,
-                PageRequest.of(page,size,Sort.by(Sort.Direction.DESC,"createdAt")))
+    public PageResult<AdminDtos.UserView> list(int page, int size, String search, UserStatus status,
+                                               String role, Sort.Direction direction) {
+        Sort sort=Sort.by(direction==null?Sort.Direction.DESC:direction,"createdAt");
+        return PageResult.from(users.findAdmin(normalizeBlank(search), status, normalizeBlank(role),
+                PageRequest.of(page,size,sort))
                 .map(this::view));
     }
 
+    /** Administrative detail. Deleted users stay readable so operators can inspect an audit target. */
     @Transactional(readOnly=true)
-    public AdminDtos.UserView get(String id) { return view(require(id)); }
+    public AdminDtos.UserView get(String id) {
+        return view(users.findByPublicId(id).orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND)));
+    }
 
     @Transactional
     public AdminDtos.UserView create(AuthenticatedUser actor, AdminDtos.CreateUser request) {
@@ -66,6 +75,7 @@ public class AdminUserService {
         AppUser user=users.saveAndFlush(new AppUser(email,passwords.encode(request.password()),request.displayName().trim()));
         assignRoles(user,request.roles(),users.getReferenceById(actor.id()));
         storage.save(new UserStorageUsage(user,defaultQuota));
+        usage.createAccount(user);
         audit.record(actor,AdminAuditAction.USER_CREATE,user,"USER",user.getPublicId(),null);
         return view(user);
     }
@@ -88,11 +98,22 @@ public class AdminUserService {
         UserStatus before=user.getStatus();
         user.changeStatus(request.status(),request.reason(),request.bannedUntil());
         if(request.status()!=UserStatus.NORMAL) refreshTokens.revokeAll(user.getId());
-        AdminAuditAction action=request.status()==UserStatus.BANNED?AdminAuditAction.USER_BAN:
-                before==UserStatus.BANNED&&request.status()==UserStatus.NORMAL?AdminAuditAction.USER_UNBAN:
-                        AdminAuditAction.USER_DISABLE;
-        audit.record(actor,action,user,"USER",id,"{\"status\":\""+request.status()+"\"}");
+        audit.record(actor,statusAction(before,request.status()),user,"USER",id,
+                "{\"from\":\""+before+"\",\"to\":\""+request.status()+"\"}");
         return view(user);
+    }
+
+    private AdminAuditAction statusAction(UserStatus before,UserStatus target){
+        return switch(target){
+            case BANNED -> AdminAuditAction.USER_BAN;
+            case DISABLED -> AdminAuditAction.USER_DISABLE;
+            case NORMAL -> switch(before){
+                case BANNED -> AdminAuditAction.USER_UNBAN;
+                case DISABLED -> AdminAuditAction.USER_ENABLE;
+                default -> AdminAuditAction.USER_UPDATE;
+            };
+            case DELETED -> throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+        };
     }
 
     @Transactional
@@ -138,14 +159,41 @@ public class AdminUserService {
     }
     private AppUser require(String id){ return users.findByPublicIdAndDeletedAtIsNull(id)
             .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND)); }
+    @Transactional
+    public AdminDtos.UserView adjustUsage(AuthenticatedUser actor,String id,AdminDtos.UsageAdjust request){
+        AppUser user=require(id); authorization.requireCanManage(actor,user);
+        usage.adjust(user.getId(), AiUsageService.KEY_ADJUST_PREFIX + PublicIdGenerator.newUlid(),
+                request.tokenDelta(), request.costDelta());
+        audit.record(actor,AdminAuditAction.USER_USAGE_ADJUST,user,"USER_USAGE",id,
+                "{\"tokenDelta\":"+request.tokenDelta()
+                        +",\"costDelta\":\""+request.costDelta().toPlainString()
+                        +"\",\"reason\":\""+json(request.reason())+"\"}");
+        return view(user);
+    }
+
     private AdminDtos.UserView view(AppUser user){
-        var usage=storage.findById(user.getId()).orElse(null);
+        var storageUsage=storage.findById(user.getId()).orElse(null);
         return new AdminDtos.UserView(user.getPublicId(),user.getEmailNormalized(),user.getDisplayName(),user.getStatus(),
                 user.getBanReason(),user.getBannedUntil(),user.getLastLoginAt(),
                 Set.copyOf(userRoles.findEnabledRoleCodesByUserId(user.getId())),
-                usage==null?0:usage.getUsedBytes(),usage==null?0:usage.getQuotaBytes(),
+                storageUsage==null?0:storageUsage.getUsedBytes(),storageUsage==null?0:storageUsage.getQuotaBytes(),
                 requests.countByUserId(user.getId()),requests.sumTotalTokensByUserId(user.getId()),
+                usage.snapshot(user.getId()),
                 user.getCreatedAt(),user.getUpdatedAt());
+    }
+    private String json(String value){
+        StringBuilder out=new StringBuilder();
+        for(char c : value.toCharArray()){
+            switch(c){
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> { if(c < 0x20) out.append(String.format("\\u%04x",(int)c)); else out.append(c); }
+            }
+        }
+        return out.toString();
     }
     private String normalizeEmail(String value){return Normalizer.normalize(value,Normalizer.Form.NFKC).trim().toLowerCase(Locale.ROOT);}
     private String normalizeBlank(String value){return value==null||value.isBlank()?null:value.trim();}

@@ -73,6 +73,10 @@ public class AiModel extends PublicIdEntity {
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
 
+    /** Platform default for this {@link ModelType}; at most one row per type may be {@code true}. */
+    @Column(name = "is_default", nullable = false)
+    private boolean isDefault;
+
     protected AiModel() {
     }
 
@@ -146,4 +150,13 @@ public class AiModel extends PublicIdEntity {
     }
 
     public void disable() { status = ModelStatus.DISABLED; }
+
+    public boolean isDefault() { return isDefault; }
+
+    public void markDefault() { isDefault = true; }
+
+    public void clearDefault() { isDefault = false; }
+
+    /** Used by the console reorder action to swap positions with a sibling model. */
+    public void moveTo(int sortOrder) { this.sortOrder = sortOrder; }
 }

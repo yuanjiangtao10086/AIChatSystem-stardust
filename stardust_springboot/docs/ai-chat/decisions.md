@@ -349,13 +349,118 @@
 - 原因：Chat History、Short Memory、Long Memory 与 RAG 的来源、生命周期和安全语义不同；将文档并入 Memory 或全量装入 Prompt 会破坏用户控制和上下文预算。
 - 后果：Current User 仍只出现一次，总 context window 是最终硬边界。Reranker/citation 可在 port/事件契约上扩展，但不能绕过 owner、READY、Top-K 和 Token Budget。
 
+## ADR-050：模型价格单位为「每 1,000 tokens」，首版统一结算币种
+
+- 状态：Accepted（阶段 12）
+- 决策：`ai_model.input_price/output_price` 的单位固定为「每 1,000 tokens」，`ai_model.currency` 只是价格快照展示信息。结算与额度使用平台统一币种 `app.ai.usage.currency`（默认 `USD`），`ai_usage_account`/`ai_usage_ledger` 只保存平台币种金额。
+- 原因：此前价格字段没有单位定义，任何计费实现都会产生数量级歧义；首版没有多币种兑换、汇率快照和跨币种对账能力，混用模型币种会让 ledger 无法加总。
+- 后果：新增 Provider/Model 时必须按每 1K tokens 录入价格；未来支持多币种需要新 ADR 引入汇率快照与换算规则，不能把模型币种直接写入 ledger。
+
+## ADR-051：AI 额度使用 Reserve → Settle/Release，停止与失败释放预留
+
+- 状态：Accepted（阶段 12）
+- 决策：生成前在同一短事务内按「上下文估算 prompt tokens + 模型 `max_output_tokens`（或配置预留）」reserve 并在 `ai_usage_ledger` 追加 `RESERVE`；正常完成按 Provider 上报的真实 prompt/completion tokens `SETTLE`；停止与失败 `RELEASE` 返还预留。`(ai_request_id, operation_key)` 唯一约束保证每个动作幂等。ledger 的 `token_delta/cost_delta` 语义统一为「已承诺用量（used + reserved）的增量」，因此 `sum(delta) == used + reserved` 恒成立，SETTLE/RELEASE 可以为负。
+- 原因：只在结束后累计 token 无法阻止并发超额；持有预留又不结算会永久泄漏额度。停止/失败时 Provider 未上报 usage，无法证明真实消耗，按保守策略返还而不是猜测计费。
+- 后果：用户主动停止或请求失败当前不计费，可被高频「发起即停止」滥用，需要在限流/风控阶段配合约束。悬挂预留由启动恢复扫描 interrupted request 释放；周期对账、ADJUST 人工调整和管理员额度管理仍属后续阶段。额度不足抛出 `42902 AI_QUOTA_EXCEEDED` 并回滚整个消息准备事务，不会产生半创建消息。
+
+## ADR-052：首版限流使用单实例内存计数器，且只信任直连地址
+
+- 状态：Accepted with limitation（阶段 12）
+- 决策：`InMemoryRateLimiter` 以 JVM 堆内固定窗口计数实现失败计数与冷却封禁；`LoginAttemptGuard` 同时按客户端地址与归一化邮箱计数。客户端地址只取 `HttpServletRequest.getRemoteAddr()`，**不解析 `X-Forwarded-For`**。
+- 原因：当前未引入 Redis（ADR-011），也没有可信代理清单；解析可伪造的转发头会让攻击者通过改头绕过限流。
+- 后果：限流状态在重启后丢失且不跨实例共享，多实例部署前必须引入共享限流器并同时定义可信代理与真实客户端地址来源。计数只保存失败次数与窗口/封禁时间，不保存凭据、Token 或请求体。
+
+## ADR-053：用量对账只报告漂移，不自动改写余额
+
+- 状态：Accepted（阶段 12）
+- 决策：周期任务先按 `ai_request_log` 事实清扫悬挂 RESERVE（缺失或 `FAILED/STOPPED` 请求释放，`COMPLETED` 请求按其记录 token 结算，`PENDING/STREAMING` 不动），再比对账户 `used + reserved` 与当前周期 ledger 求和；漂移只写告警日志，绝不静默纠正账户余额。
+- 原因：请求日志是终态事实，适合自动收敛预留；而账户与 ledger 不一致通常意味着代码缺陷或人工误操作，自动改写会掩盖根因并制造不可追溯的资金变动。
+- 后果：漂移需要运维按 ledger 人工核对后以 ADJUST 纠正；`AiUsageReconciliationService` 当前扫描全部账户，用户量增长后需改为分页/游标扫描。
+
+## ADR-054：管理员额度调整必须审计、幂等且不能使已用量变负
+
+- 状态：Accepted（阶段 12）
+- 决策：`POST /api/v1/admin/users/{id}/usage:adjust` 需要管理员权限、受 `requireCanManage` 约束、理由必填并写入 `admin_audit_log.metadata_json`（JSON 转义）；写入 `ADJUST` ledger 行，`ai_request_id` 为 NULL，`operation_key` 由调用方保证唯一以实现幂等。负增量不得使 `used` 变负，正增量不得超过额度。
+- 原因：额度等于计费事实，任何人工改动都必须可追溯、可重放安全，且不能制造负余额这种无意义状态。
+- 后果：`ADJUST` 行不参与 `(ai_request_id, operation_key)` 唯一约束，幂等依赖 `operation_key` 自身唯一，调用方必须用不可预测后缀。按币种/价格的人工退费仍需走未来的计费模块，不用调整接口表达退款语义。
+
+## ADR-055：管理端前端不引入第三方组件库，复用既有 Vue 3 + SCSS 设计语言
+
+- 状态：Accepted（阶段 11A）
+- 决策：管理控制台（Dashboard / 用户管理 / 用户详情）直接使用项目既有的 Vue 3 + TypeScript + Vuex 基础设施与 `styles.scss` 设计语言，自建轻量 `AdminModal`/`AdminPager` 等组件，不引入 Element Plus / Ant Design Vue 等组件库；`/admin` 采用嵌套路由，侧栏导航与退出登录由 `AdminShell` 承载。
+- 原因：聊天端已确立无组件库的自有视觉体系，管理端若另引一套 UI 库会造成设计割裂、包体积膨胀与长期维护双轨；当前管理界面规模有限，自建模态框/分页/表单足以覆盖，且所有敏感写操作仍以服务端 RBAC 与审计为唯一权威。
+- 后果：后续接入的对话/文件/知识库/AI 运营/审计日志前端须沿用同一套无组件库模式；若未来管理界面复杂度显著增长并确需组件库，须以新 ADR 评估，不得静默混用两套 UI 体系。未接入模块在侧栏以「待接入」明确标注，不伪装为已实现。
+
+## ADR-056：限流器抽为可插拔接口，内存默认、Redis 适配器可切换
+
+- 状态：Accepted（阶段 13）
+- 决策：`RateLimiter` 抽为接口，`InMemoryRateLimiter` 为默认实现（单实例、重启丢失、不跨实例），`RedisRateLimiter` 经 Spring Data Redis + Lettuce + Lua 原子计数作为共享适配器；由 `app.security.rate-limit.store=memory|redis` 选择，默认 `memory`，不强制引入 Redis。登录/注册/刷新/上传统一经 `LoginAttemptGuard` 与 `EndpointRateGuard` 接入；真实客户端地址由 `ClientIpResolver` 解析，仅当直连 peer 命中 `app.security.rate-limit.trusted-proxies`（精确或 IPv4 CIDR）才取 `X-Forwarded-For` 最左跳。
+- 原因：阶段 12 仅登录有内存限流，注册/刷新/上传无防护，且单实例内存态无法横向扩展（ADR-052）。抽接口使切换 Redis 为零业务改动；Redis 仍仅作可重建的共享计数，绝不成为授权事实源（ADR-011）。默认 `memory` 保证无 Redis 依赖即可运行。
+- 后果：生产多实例前须置 `RATE_LIMIT_STORE=redis` 并部署 Redis（密码经 `REDIS_PASSWORD_ENCODED=true` 以 base64 注入）；`resetAll` 在共享态下为运维动作、不在代码路径；新增限流入口须显式接入 `EndpointRateGuard` 并设 `trusted-proxies`，否则仍只信直连地址。
+
+## ADR-057：可观测性以 Prometheus 指标暴露，漂移与限流命中不再仅落日志
+
+- 状态：Accepted（阶段 13）
+- 决策：引入 Spring Boot Actuator + Micrometer（`micrometer-registry-prometheus`），暴露 `/actuator/prometheus`（仅 `ADMIN`/`SUPER_ADMIN` 可访问，`health`/`info` 公开）。对账漂移（`ai_usage_reconcile_drift_total` 等）与四类限流命中（`auth_*_rate_limited_total`）从纯日志升级为可采集计数器；告警规则由运维在 Grafana/Prometheus 侧配置，后端只产指标不内置告警。
+- 原因：阶段 12 对账漂移与限流仅写日志，无法被动告警（ADR-053 只报告不改写）。指标化后 `drift>0` 与限流突增可被监控捕获，符合生产可观测性要求。
+- 后果：Prometheus 拉取需独立 bearer/管理端口策略；指标命名遵循 `_total` 计数器与稳定语义；新增可观测信号须走 MeterRegistry，不得回退到仅靠日志。
+
+## ADR-058：管理员查看用户聊天必须审计且禁止越权读取 SUPER_ADMIN 资源
+
+- 状态：Accepted（阶段 11B）
+- 决策：管理员打开任意会话详情 / 消息列表、删除会话 / 单条消息时，由 `AdminResourceService` 在 Service 层经 `AdminAuditService.record` 自动写入 `admin_audit_log`（动作 `VIEW_CONVERSATION` / `VIEW_CHAT_MESSAGES` / `DELETE_CONVERSATION` / `DELETE_CHAT_MESSAGE`），前端**不**自行提交审计事件。读取/删除前调用 `AdminAuthorizationService.requireCanView`：若目标用户持有 `SUPER_ADMIN` 角色且操作者非 `SUPER_ADMIN`，则 `40301` 拒绝其查看/删除该用户的私人聊天资源；`USER` 与 `BANNED` 管理员在既有 Spring Security `hasAnyRole` 与 JWT 过滤器层即被拒绝。
+- 原因：管理员读取用户聊天属敏感操作（阶段 11 已定义），必须留痕且不可由前端伪造；同时按层级最小权限原则，低阶管理员不应触碰最高权限者的私人内容。审计动作命名与阶段 11A 用户管理一致（`VIEW_*`/`DELETE_*` 前缀），并将原先 `CONVERSATION_VIEW`/`CONVERSATION_DELETE` 重命名为 `VIEW_CHAT_MESSAGES`/`DELETE_CONVERSATION` 以区分「查看消息」与「查看会话」。
+- 后果：新增敏感读取必然产生审计行；`SUPER_ADMIN` 资源对低阶管理员不可见，若未来需要合规审查最高权限者自身，须另立流程（如双人复核或独立审计角色），不得放宽 `requireCanView`；管理员查询复用既有 `Conversation`/`ChatMessage` Entity 与 Repository，不新建 Admin 实体，普通用户接口不被污染。
+
+## ADR-059：管理员文件管理必须走 StorageService、强制审计且不得暴露内部路径
+
+- 状态：Accepted（阶段 11C）
+- 决策：管理员文件列表/详情/下载/删除全部复用既有 `user_file` 元数据、`FilePersistenceService` 状态机与 `StorageService`（`StorageProvider` port）。`AdminResourceService` 只以文件 `publicId` 寻址，物理对象一律经 `storage.open/delete` 访问，**Controller 不接触任何本地文件路径**；详情与列表响应永不返回 `object_key` 或服务器绝对路径。删除仍走 `beginDelete → storage.delete → finishDelete`（失败 `restoreDelete`）并同步释放 `user_storage_usage`，已被引用的文件返回 `409`。下载前 `requireSafeObjectKey` 拒绝含 `..`、以 `/` 开头或含反斜杠的 object key；`LocalStorageProvider.SAFE_KEY` 白名单与 root 包含校验作为第二道防线。敏感动作由 Service 层写 `admin_audit_log`：查看详情 `VIEW_USER_FILE`、下载 `FILE_DOWNLOAD`、删除 `FILE_DELETE`；`ADMIN` 对 `SUPER_ADMIN` 私人文件受 `requireCanView` 约束（延续 ADR-058）。
+- 原因：管理员跨用户读取文件属敏感操作，需要可追溯且不可由前端伪造；直接拼路径或让 Controller 访问文件系统会绕过已建立的 Storage port、配额状态机与路径穿越防护（ADR-006/041/042），也会把服务器目录结构泄漏给管理端。
+- 后果：管理端下载只能经受审计的 `/api/v1/admin/files/{id}/download`，无法直连对象；新增存储 adapter 时管理员路径自动继承其安全语义。`SUPER_ADMIN` 文件对低阶管理员不可见，如需合规审查最高权限者须另立流程。响应字段新增前须确认不含路径类敏感信息；`minSize/maxSize` 单位为字节，`VIEW_USER_FILE`/`FILE_DOWNLOAD` 会因每次打开而各产生一条审计行。
+
+## ADR-060：管理员知识库 / RAG 管理必须经 Spring 中转 Python 并强制审计
+
+- 状态：Accepted（阶段 11D）
+- 决策：管理员的知识库列表/详情、文档列表与筛选、重新处理、删除文档、删除向量数据，全部只暴露为 `/api/v1/admin/**` REST 接口；**需要 AI 处理的操作（重新处理的解析/向量化、向量删除）只能由 Spring 的 `KnowledgeDocumentService` 经 `RagGateway` port 调用 Python AI 服务**，Vue 只与 Spring 通信，永不直接访问 Python。查看知识库详情写 `VIEW_KNOWLEDGE_BASE`，重新处理写 `RAG_DOCUMENT_RETRY`，删除文档写 `RAG_DOCUMENT_DELETE`，删除向量写 `RAG_VECTOR_REMOVE`；`ADMIN` 对 `SUPER_ADMIN` 的私人知识库/文档受 `requireCanView` 约束（`40301`）。管理端只复用既有 `KnowledgeBaseService`/`KnowledgeDocumentService` 状态机，不新增表、不为管理员新增 Python 入口。`chunkCount` 必须与真实 chunk 行一致（删除向量后清零）。
+- 原因：Python 不持有用户身份与业务事实（ADR-002），若让管理端绕过 Spring 直接调用 Python，会同时失去 RBAC、owner scope、审计与状态机一致性；管理员跨用户查看/重建/删除他人知识资产同样属于敏感操作，必须留痕且不可由前端伪造。
+- 后果：新增 RAG 管理动作必须先在 Spring 侧落地为受审计的管理端接口，再由 `RagGateway` 转发；不得为「方便」给 Vue 增加 Python 直连配置。删除向量保留文档记录（状态 `FAILED` / `VECTOR_REMOVED`）以便追溯，`chunkCount` 归零。管理员重试仅接受 `FAILED` 文档，否则 `409`。`SUPER_ADMIN` 的知识资产对低阶管理员不可见，如需合规审查须另立流程。
+
+## ADR-061：AI 目录密钥只写不读，掩码来自运行时解析且审计不含密钥
+
+- 状态：Accepted（阶段 11E）
+- 决策：管理端 AI 服务商 / 模型目录的密钥采用**只写不读**：数据库只保存引用（`credential_ref`，沿用 ADR-016），任何端点都不返回引用值或明文，只返回 `hasApiKey`（布尔）与 `maskedApiKey`（由 `ProviderCredentialResolver` 在**运行时**解析出的真实值经 `CredentialMask` 掩码，如 `sk-****1234`）。写入侧 `credentialRef` 只接受引用形式（`env:NAME`、`vault:…`），裸密钥返回 `40001`，从协议层杜绝明文入库；`AiProvider.getCredentialRef()` 加 `@JsonIgnore` 作为序列化第二道防线；编辑时留空表示保持原密钥不变、填新引用才替换；审计元数据只记录 `credentialConfigured`/`credentialReplaced` 等布尔与非敏感字段，**不记录引用名、更不记录密钥**。默认模型在同一 `type` 内唯一且仅 `ENABLED` 模型可设（停用即清标记）。
+- 原因：管理界面需要回答「是否已配置」「是不是同一个 Key」，但**不需要**读回密钥；一旦允许 GET 回显，任何一次前端漏洞、日志采集、浏览器缓存或截图都会造成密钥泄漏。自制加密方案会引入未经验证的密码学风险，而现有架构已有引用式凭据与部署期注入可沿用（ADR-016/ADR-032）；掩码由运行时真实值推导，也避免把「已配置」误报为「可用」。
+- 后果：前端不提供查看/复制完整 Key 的能力，只显示掩码；掩码依赖部署环境真正提供被引用的变量，未提供时只能显示「已配置」而无掩码。轮换密钥需更新环境变量并在控制台修改引用。未来接入 Vault/KMS 只需替换 `ProviderCredentialResolver` 实现，接口与响应契约不变。新增 AI 目录响应字段前必须证明其不含密钥、引用与内部路径；`credentialRef` 的校验规则前后端须同步（前端 `CREDENTIAL_REF_PATTERN` 与服务端 `@Pattern` 一致）。
+
+## ADR-062：管理端总览为实时只读聚合，审计与调用日志只可读取
+
+- 状态：Accepted（阶段 11F）
+- 决策：`GET /api/v1/admin/dashboard` 只做**实时只读聚合**，不建仪表盘表、不落物化视图；趋势固定为最近 24 小时 UTC 逐小时分桶（恒 24 个点，空平台返回零值桶），分桶在 Java 内完成（仓库只投影 `created_at` 与 `status` 两列）；近期审计与近期失败调用各取最新 5 条。审计日志与 AI 调用日志**只提供分页与筛选**（审计：管理员 / 动作 / 目标类型 / 时间区间；调用：用户 / 状态 / 服务商 / 模型 / 时间区间），**不提供任何写入、修改或删除入口**：审计行只能由业务 Service 在动作发生时写入。为支撑时间筛选新增 V12 索引 `ai_request_log(created_at, id)` 与 `admin_audit_log(created_at, id)`。
+- 原因：预计算仪表盘会制造与事实源不一致的第二真相，并带来回填与对账负担；日志一旦可写便失去留痕意义（前端可伪造或抹除），而审计与排障的第一诉求正是「谁在什么时间做了什么」。时间区间筛选在原索引下（均以其他列为前导列）必然全表扫描，因此补两个以时间为前导列的索引即可，无需新表。
+- 后果：仪表盘在调用量大时会有 O(近 24 小时行数) 的扫描成本，若规模显著增长应引入按小时 rollup 或改用既有的 Prometheus 指标（ADR-057），届时需新 ADR；趋势口径固定为 UTC 小时，不随浏览器时区变化。审计日志不支持对目标用户、IP 或 `metadata_json` 的模糊搜索（会触发全表扫描），需要更强的检索时应接入外部日志系统，而不是在库内加 `LIKE`。新增审计动作须同步 `AdminAuditAction` 与前端 `AUDIT_ACTION_LABELS`，否则控制台会回退显示原始枚举。
+
+## ADR-063：管理端列表必须与详情适用同一授权规则，且不得把非 404 错误显示为「未找到」
+
+- 状态：Accepted（阶段 11 排错）
+- 决策：管理端资源列表（`/api/v1/admin/conversations`、`/files`、`/knowledge-bases`、`/knowledge-documents`）与对应详情/读取接口必须适用**同一条**授权规则：非 `SUPER_ADMIN` 的管理员既不能打开、也**不能看到** `SUPER_ADMIN` 的私人资源。实现上由 Service 计算 `hidesSuperAdminOwned(actor)` 并下推到 `findAdmin` 的 JPQL 子查询（`not exists (UserRole where role.code='SUPER_ADMIN' and role.status=ENABLED)`），与 `AdminAuthorizationService.requireCanView` 保持同一语义。前端详情视图必须区分「服务端明确 404」与「其它失败」：只有 `ApiError.status === 404` 才显示「未找到/已删除」，其余一律显示 `HTTP 状态 + 平台错误码 + 服务端 message`。
+- 原因：修复「列表有数据、详情 Not Found」的根因。此前列表不施加 ADR-058 的 SUPER_ADMIN 保护，详情却施加，于是 `ADMIN` 能看到 `SUPER_ADMIN` 的会话/文件/知识库，点击后收到 `40301`；而详情视图把 `error` 渲染在 `v-else`（详情存在）分支内，任何失败都落到 `!detail` 分支显示「未找到该会话，或已被删除。」，把 RBAC 拒绝伪装成数据缺失。两者叠加使「权限不一致」表现为「数据不一致」。用户管理不受影响，因为 `/users/{id}` 详情不调用 `requireCanView`（走 `requireCanManage`）。
+- 后果：列表查询多一个 `not exists` 子查询，代价可接受且已包含在既有分页查询中；`SUPER_ADMIN` 资源对低阶管理员彻底不可见（与 ADR-058 一致，不放宽）。若未来需要合规审查最高权限者自身，须另立流程。新增管理端资源必须同时配置列表过滤与详情 `requireCanView`，否则再次出现同一不一致。前端新增详情视图必须复用 `isNotFoundError` / `describeError`，禁止把所有失败折叠为「未找到」。
+
+## ADR-064：写入审计的事务不得声明 readOnly，审计枚举读取必须容错
+
+- 状态：Accepted（阶段 11H）
+- 决策：两点。(1) 任何会写入 `admin_audit_log` 的读取接口（`conversation` / `file` / `download` / `knowledgeBase`）必须使用**可写**事务（`@Transactional`），不得使用 `@Transactional(readOnly = true)`；只读事务由 Spring 施加 `FlushMode.MANUAL`，在其中依赖 IDENTITY 插入的副作用既不可移植也不可保证。(2) `admin_audit_log.action` 不再使用 `@Enumerated(STRING)`，改用 `AdminAuditActionConverter`：未知的历史值降级为 `AdminAuditAction.LEGACY` 而不是抛异常；已存在的历史值由 `V13__normalize_admin_audit_action.sql` 归一化（`CONVERSATION_VIEW → VIEW_CHAT_MESSAGES`、`CONVERSATION_DELETE → DELETE_CONVERSATION`）。同时 `AdminAuditService` 对 `ip` 兜底 `unknown`、按 UTF-8 安全边界截断，并在写失败时记录 `action/resourceType/resourceId/adminId/requestId` 后原样抛出。
+- 原因：管理端「对话 / 文件 / 知识库」详情统一报 `HTTP 500 / 50002 persistence operation failed`，而列表与用户详情正常。差异只有一项——这三个详情在 `readOnly = true` 事务里写入审计行。另一路独立故障是 `@Enumerated(STRING)` 遇到 `V9/V11` 时期写入的 `CONVERSATION_VIEW` 会抛 `IllegalArgumentException`，被 `GlobalExceptionHandler` 包成 50002，表现为「审计日志页打不开」，与枚举不匹配毫无关联性。
+- 后果：审计写入与业务读取在同一可写事务内提交，语义明确；单个无法识别的历史动作值不再能让整张审计表不可读（降级为 `LEGACY`，前端标签表回落显示原始值）。新增审计写入的读取接口必须使用可写事务。`LEGACY` 只能由数据驱动产生，应用代码不得写入。前端 `AUDIT_ACTION_LABELS` 可补 `LEGACY: 历史动作`。
+
 ## 待决事项
 
 以下问题不阻塞阶段 0，但必须在相应阶段进入新 ADR：
 
 1. 当前默认 Vue/Spring 同源；若生产改为跨域，需确定精确 allowlist、Origin 校验与 Cookie 策略。
 2. Spring Security/JWT 库兼容性，以及 V1 在目标 MySQL 8.x 小版本的验证结果。
-3. 管理端 UI 框架仍待选择；用户聊天 Markdown/高亮/LaTeX 已采用 ADR-039 的技术组合。
+3. 管理端 UI 框架已由 ADR-055 确定：不引入第三方组件库，复用既有 Vue 3 + SCSS 设计语言。
 4. 生产对象存储采用 MinIO/S3/OSS/COS 中哪一种，以及从 LocalStorage 的迁移窗口。
 5. VectorStore、Embedding、Parser、Reranker 的实测选型。
 6. 数据保留、用户注销匿名化、管理员敏感读取的合规周期。

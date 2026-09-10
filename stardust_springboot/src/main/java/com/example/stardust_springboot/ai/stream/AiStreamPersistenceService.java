@@ -18,9 +18,12 @@ import com.example.stardust_springboot.conversation.entity.MessageContentFormat;
 import com.example.stardust_springboot.conversation.entity.MessageRole;
 import com.example.stardust_springboot.conversation.entity.MessageStatus;
 import com.example.stardust_springboot.conversation.memory.ConversationContextBuilder;
+import com.example.stardust_springboot.conversation.memory.TokenCounter;
 import com.example.stardust_springboot.conversation.repository.ChatMessageRepository;
 import com.example.stardust_springboot.conversation.repository.ConversationRepository;
 import com.example.stardust_springboot.conversation.service.MessageAttachmentService;
+import com.example.stardust_springboot.config.AiUsageProperties;
+import com.example.stardust_springboot.usage.service.AiUsageService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +39,9 @@ public class AiStreamPersistenceService {
     private final AiRequestLogRepository requestLogRepository;
     private final MessageAttachmentService attachmentService;
     private final ConversationContextBuilder contextBuilder;
+    private final AiUsageService usageService;
+    private final TokenCounter tokenCounter;
+    private final AiUsageProperties usageProperties;
     private final Clock clock;
 
     public AiStreamPersistenceService(ConversationRepository conversationRepository,
@@ -44,6 +50,9 @@ public class AiStreamPersistenceService {
                                       AiRequestLogRepository requestLogRepository,
                                       MessageAttachmentService attachmentService,
                                       ConversationContextBuilder contextBuilder,
+                                      AiUsageService usageService,
+                                      TokenCounter tokenCounter,
+                                      AiUsageProperties usageProperties,
                                       Clock clock) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -51,6 +60,9 @@ public class AiStreamPersistenceService {
         this.requestLogRepository = requestLogRepository;
         this.attachmentService = attachmentService;
         this.contextBuilder = contextBuilder;
+        this.usageService = usageService;
+        this.tokenCounter = tokenCounter;
+        this.usageProperties = usageProperties;
         this.clock = clock;
     }
 
@@ -97,12 +109,16 @@ public class AiStreamPersistenceService {
         AiRequestLog requestLog = requestLogRepository.saveAndFlush(
                 new AiRequestLog(requestId, conversation.getUser(), conversation, assistantMessage, model));
 
-        List<AiGatewayRequest.AiGatewayMessage> context = contextBuilder.build(userMessage, model);
-
-        return new PreparedAiStream(requestId, principal.id(), conversation.getId(),
+        // Quota reservation needs a prompt-token estimate, but the remote RAG query embedding must NOT run
+        // on the HTTP request thread (it would block the SSE response and hold the conversation FOR UPDATE
+        // lock). We therefore estimate from the local-only context (system + summary + memory + recent +
+        // current); the worker later builds the full context with RAG. The estimate is conservative.
+        List<AiGatewayRequest.AiGatewayMessage> quotaContext = contextBuilder.buildForTokenEstimate(
+                userMessage, model);
+        return reserveUsage(new PreparedAiStream(requestId, principal.id(), conversation.getId(),
                 assistantMessage.getId(), requestLog.getId(), conversation.getPublicId(),
                 userMessage.getPublicId(), assistantMessage.getPublicId(), model.getPublicId(),
-                model.getProvider().getCode(), model.getExternalModelId(), "SEND", context);
+                model.getProvider().getCode(), model.getExternalModelId(), "SEND", quotaContext), model);
     }
 
     @Transactional
@@ -131,8 +147,8 @@ public class AiStreamPersistenceService {
         messageRepository.saveAndFlush(assistant);
         AiRequestLog log = requestLogRepository.saveAndFlush(
                 new AiRequestLog(PublicIdGenerator.newUlid(), conversation.getUser(), conversation, assistant, model));
-        return prepared(principal, conversation, target.getParentMessage(), assistant, log, model,
-                "REGENERATE", contextBuilder.build(target.getParentMessage(), model));
+        return reserveUsage(prepared(principal, conversation, target.getParentMessage(), assistant, log, model,
+                "REGENERATE", contextBuilder.buildForTokenEstimate(target.getParentMessage(), model)), model);
     }
 
     @Transactional
@@ -177,8 +193,8 @@ public class AiStreamPersistenceService {
 
         AiRequestLog log = requestLogRepository.saveAndFlush(
                 new AiRequestLog(PublicIdGenerator.newUlid(), conversation.getUser(), conversation, assistant, model));
-        return prepared(principal, conversation, revisedUser, assistant, log, model,
-                "EDIT_AND_RESEND", contextBuilder.build(revisedUser, model));
+        return reserveUsage(prepared(principal, conversation, revisedUser, assistant, log, model,
+                "EDIT_AND_RESEND", contextBuilder.buildForTokenEstimate(revisedUser, model)), model);
     }
 
     @Transactional
@@ -194,8 +210,11 @@ public class AiStreamPersistenceService {
         ChatMessage message = requireMessage(stream);
         message.completeStreaming(content, now, reason, usage.promptTokens(),
                 usage.completionTokens(), usage.totalTokens());
-        requireLog(stream).complete(now, usage.promptTokens(), usage.completionTokens(), usage.totalTokens());
+        AiRequestLog requestLog = requireLog(stream);
+        requestLog.complete(now, usage.promptTokens(), usage.completionTokens(), usage.totalTokens());
         requireConversation(stream).touchLastMessageAt(now);
+        usageService.settle(stream.requestId(), orZero(usage.promptTokens()), orZero(usage.completionTokens()),
+                requestLog.getModel().getInputPrice(), requestLog.getModel().getOutputPrice());
     }
 
     @Transactional
@@ -204,6 +223,7 @@ public class AiStreamPersistenceService {
         requireMessage(stream).stopStreaming(content, now);
         requireLog(stream).stop(now);
         requireConversation(stream).touchLastMessageAt(now);
+        usageService.release(stream.requestId());
     }
 
     @Transactional
@@ -212,6 +232,7 @@ public class AiStreamPersistenceService {
         requireMessage(stream).failStreaming(content, now, code, "AI generation failed");
         requireLog(stream).fail(now, code);
         requireConversation(stream).touchLastMessageAt(now);
+        usageService.release(stream.requestId());
     }
 
     @Transactional(readOnly = true)
@@ -219,6 +240,29 @@ public class AiStreamPersistenceService {
         return requestLogRepository.findByRequestIdAndUserId(requestId, userId)
                 .map(AiRequestLog::getStatus)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    /**
+     * Reserves quota in the same short transaction that creates the request, so an over-quota user cannot
+     * start a generation. Throws {@code 42902 AI_QUOTA_EXCEEDED} and rolls the whole preparation back.
+     */
+    private PreparedAiStream reserveUsage(PreparedAiStream stream, AiModel model) {
+        int promptTokens = 0;
+        for (AiGatewayRequest.AiGatewayMessage message : stream.messages()) {
+            promptTokens += tokenCounter.countMessage(message.role(), message.content());
+        }
+        usageService.reserve(stream.userId(), stream.requestId(), promptTokens, outputReserve(model),
+                model.getInputPrice(), model.getOutputPrice());
+        return stream;
+    }
+
+    private int outputReserve(AiModel model) {
+        Integer maxOutput = model.getMaxOutputTokens();
+        return maxOutput != null && maxOutput > 0 ? maxOutput : usageProperties.outputReserveTokens();
+    }
+
+    private long orZero(Long value) {
+        return value == null ? 0L : value;
     }
 
     private void requireUnusedIdempotencyKey(Long userId, String idempotencyKey) {
@@ -265,6 +309,22 @@ public class AiStreamPersistenceService {
                 assistantMessage.getId(), requestLog.getId(), conversation.getPublicId(),
                 userMessage.getPublicId(), assistantMessage.getPublicId(), model.getPublicId(),
                 model.getProvider().getCode(), model.getExternalModelId(), operation, context);
+    }
+
+    /**
+     * Builds the prompt context (short memory summary, long-term memory retrieval, RAG query embedding
+     * and recent messages). Runs on the streaming worker thread after the SSE response has already
+     * opened and {@code start} has been delivered, so remote/embedding latency never delays the first
+     * byte. The conversation row lock taken by {@code prepare} is long released by this point.
+     */
+    @Transactional(readOnly = true)
+    public List<AiGatewayRequest.AiGatewayMessage> buildContext(PreparedAiStream stream) {
+        ChatMessage userMessage = messageRepository.findByPublicIdAndUserIdAndDeletedAtIsNull(
+                        stream.userMessageId(), stream.userId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+        AiModel model = modelRepository.findEnabledChatModel(stream.modelId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+        return contextBuilder.build(userMessage, model, stream.requestId());
     }
 
     private ChatMessage requireMessage(PreparedAiStream stream) {

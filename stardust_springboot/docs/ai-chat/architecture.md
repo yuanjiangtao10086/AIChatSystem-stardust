@@ -1,6 +1,6 @@
 # AI Chat SaaS 架构设计
 
-> 状态：阶段 0 基线设计；阶段 2–9 已落地；阶段 10 Knowledge Base / RAG 已落地  
+> 状态：阶段 0 基线设计；阶段 2–13 已落地；阶段 13 统计聚合/共享限流/可观测性已落地；阶段 12 AI Usage/限流/对账已落地  
 > 盘点日期：2026-09-07  
 > 适用目录：`stardust_vue/`、`stardust_springboot/`、`stardust_ai/`
 
@@ -47,7 +47,7 @@
 | Spring Boot | `4.1.1` |
 | 构建 | Maven；系统 Maven `3.9.4` 可用 |
 | Web | `spring-boot-starter-webmvc` |
-| ORM/MySQL/Redis | Spring Data JPA + MySQL；测试为 H2 MySQL mode；Redis 尚未引入 |
+| ORM/MySQL/Redis | Spring Data JPA + MySQL；测试为 H2 MySQL mode；Redis 经 Spring Data Redis + Lettuce 引入，仅作可切换的共享限流计数（非事实源；默认 `memory` 内存实现，可选 `redis` 适配器） |
 | Security/JWT | Spring Security、短时 JWT、数据库 Refresh Token rotation/revoke |
 | Result/Exception | 统一 `ApiResult`、`ErrorCode`、`BusinessException` 和全局异常处理 |
 | 分层代码 | 已有 auth/user/conversation/AI gateway/streaming 的 entity/repository/service/controller/DTO |
@@ -84,7 +84,9 @@
 | Resolved | Vue 尚无 Markdown 安全渲染 | 阶段 6 已完成解析、高亮、LaTeX 与最终 DOM 消毒 | 已完成 |
 | P1 | Vue 尚无仓库内长期浏览器 E2E 基础 | 阶段 6 使用一次性 Playwright/Edge 冒烟验证，尚未形成 CI 套件 | 测试基础设施阶段 |
 | P1 | Spring 当前取消注册表仅限单实例内存 | 多实例部署时 Stop 不能跨节点路由 | 扩容前引入粘性路由或分布式取消信号 |
-| P1 | AI usage 目前只有 request fact log，无 quota/ledger | 尚不能提供计费与额度保证 | AI Usage 阶段 |
+| Resolved | AI usage 只有 request fact log，无 quota/ledger | 阶段 12 已建立 account + 不可变 ledger、reserve/settle/release、管理员 ADJUST 与周期对账 | 已完成 |
+| Resolved | 限流已实现并抽为可插拔 `RateLimiter`（memory 默认 + 可选 Redis 适配器），注册/刷新/上传/登录均接入；X-Forwarded-For 仅信任白名单内可信代理 | 阶段 13 已落地，见 ADR-056 | 已完成 |
+| P1 | 对账任务全表扫描 `ai_usage_account` | 用户量增长后单次扫描成本上升 | 数据量验证后改为分片/游标扫描 |
 | P2 | 根目录不是 Git 仓库，只有 `stardust_vue` 是独立 Git 仓库 | 跨三端变更难以统一审计 | 由项目 Owner 决定仓库策略 |
 | P2 | Spring Boot 4.1.1 与未来第三方库的兼容性尚未验证 | ORM/JWT/文档库选择可能受限 | 每次引入依赖前验证；阶段 0 不降级 |
 
@@ -197,7 +199,7 @@ Provider 选择集中在 Registry/Factory，不允许 `if model == ...` 散落�
 | Provider/Model | 管理元数据、启停、授权、密钥引用 | Adapter 执行与能力归一化 | 用户选模型、管理员配置 |
 | Admin | 管理 API、敏感读取审计 | 无独立管理权限 | `/admin` 页面 |
 | Audit | 追加式记录管理员敏感行为 | 仅返回运行诊断 | 展示审计数据 |
-| AI Usage | 预留额度、结算 token/cost/latency | 返回 usage | 用户/管理员统计 |
+| AI Usage | 预留额度、结算 token/cost/latency、不可变 ledger、管理员 ADJUST、周期对账 | 返回 usage | 用户用量面板、管理员额度字段与调整入口 |
 
 聊天记录、短期记忆、长期记忆、RAG 是四类独立数据和生命周期，不能混为一个消息表或每轮全部注入 Prompt。
 
@@ -206,12 +208,12 @@ Provider 选择集中在 Registry/Factory，不允许 `if model == ...` 散落�
 ## 7. Streaming 生命周期
 
 1. Vue 使用 `Idempotency-Key` 发起 `POST /api/v1/conversations/{id}/messages:stream`。
-2. Spring Security 实时拒绝非 `NORMAL` 用户；应用层以 owner-scoped lock 校验 conversation、parent message 和启用的 CHAT model/provider。
+2. Spring Security 实时拒绝非 `NORMAL` 用户；应用层以 owner-scoped lock 校验 conversation、parent message 和启用的 CHAT model/provider，并在同一短事务按「上下文估算 + 输出预留」预留额度，不足时返回 `42902 AI_QUOTA_EXCEEDED` 并回滚，不进入 SSE。
 3. Spring 在短事务中保存已完成的 USER 消息、`PENDING` ASSISTANT placeholder 与 `PENDING` `ai_request_log`，随后释放数据库事务。
 4. Spring `ContextBuilder` 分别召回有界 Long Memory 与当前 Conversation 已绑定知识库的有界 RAG sources；按模型 context window 扣除输出和安全预留，组装 System Prompt + Short Summary + Long Memory + RAG + Recent Messages + 当前 USER。每类派生上下文独立，遍历有硬上限且当前消息只出现一次；Memory/RAG 失败均可降级。
 5. Python Provider Adapter 发出版本化 `start/delta/reasoning/usage/done/error`；Spring 校验 `aiRequestId`、类型和严格递增 `seq`，再转换为外部 SSE。
 6. Spring 只在内存累计 visible content 和 usage，不为每个 delta 写数据库。
-7. 正常结束先在独立终态事务写入完整 Assistant 内容/token、`COMPLETED` request log 和 `conversation.last_message_at`；随后以独立、可降级步骤滚动刷新分支摘要并对 USER 消息做保守长期记忆提取，最后发送 `done`。摘要或提取失败只记录脱敏告警，不回滚已完成回答。
+7. 正常结束先在独立终态事务写入完整 Assistant 内容/token、`COMPLETED` request log、`conversation.last_message_at` 和 `SETTLE` 用量结算；随后以独立、可降级步骤滚动刷新分支摘要并对 USER 消息做保守长期记忆提取，最后发送 `done`。摘要或提取失败只记录脱敏告警，不回滚已完成回答。
 8. 用户 Stop、浏览器断开、Spring watchdog 超时、Python/Provider 错误均传播取消并保存 partial content，终态为 `STOPPED` 或 `FAILED`；应用启动时把遗留 `PENDING/STREAMING` 标为 `FAILED/SERVER_RESTART`。
 9. `Idempotency-Key` 以 `(user_id, client_request_id)` 唯一约束阻止重复创建；当前重复提交返回 `IDEMPOTENCY_CONFLICT`，尚不提供 SSE 重放。
 
@@ -221,11 +223,17 @@ Provider 选择集中在 Registry/Factory，不允许 `if model == ...` 散落�
 
 - 所有用户资源查询都带 `user_id` ownership scope，不能只按资源 ID 查询；当前模型不宣称支持 organization/tenant。管理员跨用户读取需要显式权限并写 `admin_audit_log`。
 - Access Token 短时有效；Refresh Token 只保存哈希，按 family rotation，复用检测后撤销整族。Token 不放 URL。
+- 登录失败按客户端地址与邮箱双维度计数并冷却；客户端地址由 `ClientIpResolver` 解析，默认只取直连地址，仅当直连 peer 命中 `app.security.rate-limit.trusted-proxies`（精确地址或 IPv4 CIDR）时才取 `X-Forwarded-For` 最左跳（ADR-052 延续）；阶段 13 起限流抽为可插拔 `RateLimiter`（见 ADR-056）。限流状态默认在 JVM 堆内（`memory` 实现），`store=redis` 时跨实例共享。
 - 上传校验大小、扩展名、声明/实际 MIME、magic/text 有效性和文件名规范化；Storage key 由服务端生成并在 provider 根目录内规范化，禁止原始路径拼接。阶段 7 已实现这些基线；病毒扫描/CDR 属于生产加固，不得把 magic 校验误称为恶意内容扫描。
+- 管理员跨用户文件管理（阶段 11C）只能以文件 `publicId` 寻址，物理对象一律经 `StorageService` 打开/删除；响应永不返回 `object_key` 与服务器绝对路径，打开/删除前再拒绝含 `..`、以 `/` 开头或含反斜杠的 object key；查看/下载/删除分别写入 `VIEW_USER_FILE`/`FILE_DOWNLOAD`/`FILE_DELETE` 审计，且受 `requireCanView` 约束（见 ADR-059）。
+- 管理员知识库 / RAG 管理（阶段 11D）遵守三层边界：Vue 只调 `/api/v1/admin/**`，需要 AI 处理的动作（重新处理、删除向量）由 Spring 经 `RagGateway` 调用 Python，**Vue 永不直连 Python**；查看/重试/删除文档/删除向量分别写入 `VIEW_KNOWLEDGE_BASE`/`RAG_DOCUMENT_RETRY`/`RAG_DOCUMENT_DELETE`/`RAG_VECTOR_REMOVE` 审计，并受 `requireCanView` 约束（见 ADR-060）。
+- 管理员 AI 服务商 / 模型目录（阶段 11E）的密钥**只写不读**：库中只存 `credential_ref` 引用，响应只返回 `hasApiKey` 与**运行时**解析出的 `maskedApiKey`；写入只接受 `env:NAME`/`vault:…` 引用，裸 Key 返回 `40001`；审计元数据只记布尔与非敏感字段，不含引用与密钥（见 ADR-061）。该目录是平台级资源，不归属用户，因此不适用 ADR-058 的所有者限制。
+- 管理端总览、审计日志与 AI 调用日志（阶段 11F）**全部只读**：总览是既有表的实时聚合，不建物化表；审计与调用日志只有分页与筛选，没有写入/修改/删除入口，审计行只能由业务 Service 产生（见 ADR-062）。日志类接口不适用 `requireCanView` 的所有者限制。
 - Markdown 默认不允许 raw HTML；渲染后消毒，链接协议白名单，代码高亮输出也需视为不可信内容。
 - Provider API Key、JWT secret、数据库/Redis密码只来自环境变量或 Secret Manager；数据库只存 `secret_ref` 或加密密文，不记录明文。
 - 管理员可配置的 Provider `base_url` 必须使用 HTTPS allowlist、规范化 URL、DNS/IP 重绑定防护和网络 egress policy，禁止访问 loopback、link-local、metadata 与内网管理地址。
 - 使用 W3C Trace Context；日志允许 `request_id/user_id/conversation_id/provider/model/latency/token/status/error_code`，禁止记录密码、Token、Cookie、Authorization、API Key 和默认完整 Prompt。
+- 阶段 13 引入 Spring Boot Actuator + Micrometer，暴露 `/actuator/prometheus`（仅 `ADMIN`/`SUPER_ADMIN`，`health`/`info` 公开）；对账漂移与限流命中从纯日志升级为可采集指标（见 ADR-057），告警规则由运维侧 Grafana/Prometheus 配置，后端只产指标不内置告警。
 - AI 审计和 usage 记录采用独立保留策略；管理员审计追加写，不允许普通 CRUD 覆盖历史。
 - 用户注销/删除时，业务行、对象、向量、缓存、日志和备份按数据保留政策分别处理；Prompt/Memory/RAG 内容不得因删除业务行而成为无人清理的孤儿数据。
 
@@ -250,6 +258,8 @@ Provider 选择集中在 Registry/Factory，不允许 `if model == ...` 散落�
 - Owner 阶段 8：Conversation Short Memory、Token Budget 与滚动分支摘要（当前已完成）。
 - Owner 阶段 9：Long-Term Memory CRUD、启停、保守提取、有界检索与 ContextBuilder 注入（当前已完成）。
 - Owner 阶段 10：Knowledge Base、Document pipeline、VectorStore、RAG Context 与用户 UI（当前已完成）。
-- 后续阶段：Admin/Audit/AI Usage 与生产存储加固；必须由 Owner 另行授权并重新编号。
+- Owner 阶段 11：管理员后台与审计（`admin_audit_log`、用户/会话/文件/知识库/Provider/Model/AI 请求管理、敏感读取审计与 `/admin` UI，当前已完成）。11A 用户管理、11B 聊天记录管理、11C 文件与云盘管理（列表多维筛选、详情与引用统计、受审计下载/删除、不暴露内部路径）、11D 知识库与 RAG 管理（知识库详情与统计、文档状态/分块/失败原因、重新处理、删除文档与向量，AI 操作经 Spring 中转 Python）、11E AI 服务商与模型管理（Provider/Model CRUD、启停、结构化能力与参数、同类型唯一默认模型、同服务商内排序、密钥只写不读与掩码、用户侧目录下发 `defaultModel`）、11F 总览 / 审计日志 / AI 请求日志（实时只读聚合与 24 小时逐时趋势、审计与调用日志的筛选分页、单条调用详情）均已落地，见 ADR-058、ADR-059、ADR-060、ADR-061、ADR-062。
+- Owner 阶段 12：AI 用量与额度。第一批（用量账户、ledger、reserve/settle/release 与 `/api/v1/usage`）、第二批（用户用量 UI、管理员额度字段与 `usage:adjust` 审计）、登录限流与周期对账均已落地；后续为按模型/Provider 的统计聚合、共享限流器与运维加固，必须由 Owner 另行授权并重新编号。
+- Owner 阶段 13：统计聚合（`GET /api/v1/usage/breakdown` 与 admin 全站聚合，实时来自 `ai_request_log`，按日/模型/Provider）、共享限流器（`RateLimiter` 接口 + `InMemoryRateLimiter` 默认 + `RedisRateLimiter` 可选适配器 + `X-Forwarded-For` 可信代理白名单，覆盖注册/刷新/上传/登录）、可观测性（Actuator/Prometheus 指标：限流命中与对账漂移），均已落地（见 ADR-056、ADR-057）。
 
 每个阶段都必须拆成小任务，遵循阅读、修改、编译、测试、修复、记录；不得因本文已设计未来能力而提前创建全部表或空壳模块。

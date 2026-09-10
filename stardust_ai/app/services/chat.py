@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -47,8 +48,18 @@ class ChatService:
         request_id: str | None = None,
     ) -> AsyncIterator[str]:
         seq = 0
+        usage_sent = False
         resolved_request_id = request_id or current_request_id()
         finish_reason: str | None = None
+        start_ns = time.perf_counter_ns()
+        first_token_ns: int | None = None
+        logger.info(
+            "chat stream start ai_request_id=%s provider_key=%s model=%s message_count=%d",
+            request.ai_request_id,
+            request.provider_key,
+            request.model,
+            len(request.messages),
+        )
         try:
             model = self._resolve_model(request)
             provider = self._registry.get(request.provider_key)
@@ -65,33 +76,75 @@ class ChatService:
             )
             seq += 1
             async for chunk in provider.stream_chat(self._to_provider_request(request)):
+                if first_token_ns is None and (chunk.content or chunk.reasoning_content):
+                    first_token_ns = time.perf_counter_ns()
+                    logger.info(
+                        "chat stream first token ai_request_id=%s serviceTtftMs=%.1f",
+                        request.ai_request_id,
+                        (first_token_ns - start_ns) / 1e6,
+                    )
                 if chunk.reasoning_content:
-                    yield self._sse(
-                        "reasoning",
-                        StreamEvent(
-                            type="reasoning",
-                            ai_request_id=request.ai_request_id,
-                            request_id=resolved_request_id,
-                            seq=seq,
-                            timestamp=self._timestamp(),
-                            payload={"content": chunk.reasoning_content},
-                        ),
-                    )
-                    seq += 1
+                    throttle = self._settings.stream_throttle_ms
+                    if throttle > 0:
+                        for piece in self._split_content(chunk.reasoning_content):
+                            yield self._sse(
+                                "reasoning",
+                                StreamEvent(
+                                    type="reasoning",
+                                    ai_request_id=request.ai_request_id,
+                                    request_id=resolved_request_id,
+                                    seq=seq,
+                                    timestamp=self._timestamp(),
+                                    payload={"content": piece},
+                                ),
+                            )
+                            seq += 1
+                            await asyncio.sleep(throttle / 1000.0)
+                    else:
+                        yield self._sse(
+                            "reasoning",
+                            StreamEvent(
+                                type="reasoning",
+                                ai_request_id=request.ai_request_id,
+                                request_id=resolved_request_id,
+                                seq=seq,
+                                timestamp=self._timestamp(),
+                                payload={"content": chunk.reasoning_content},
+                            ),
+                        )
+                        seq += 1
                 if chunk.content:
-                    yield self._sse(
-                        "delta",
-                        StreamEvent(
-                            type="delta",
-                            ai_request_id=request.ai_request_id,
-                            request_id=resolved_request_id,
-                            seq=seq,
-                            timestamp=self._timestamp(),
-                            payload={"content": chunk.content},
-                        ),
-                    )
-                    seq += 1
+                    throttle = self._settings.stream_throttle_ms
+                    if throttle > 0:
+                        for piece in self._split_content(chunk.content):
+                            yield self._sse(
+                                "delta",
+                                StreamEvent(
+                                    type="delta",
+                                    ai_request_id=request.ai_request_id,
+                                    request_id=resolved_request_id,
+                                    seq=seq,
+                                    timestamp=self._timestamp(),
+                                    payload={"content": piece},
+                                ),
+                            )
+                            seq += 1
+                            await asyncio.sleep(throttle / 1000.0)
+                    else:
+                        yield self._sse(
+                            "delta",
+                            StreamEvent(
+                                type="delta",
+                                ai_request_id=request.ai_request_id,
+                                request_id=resolved_request_id,
+                                seq=seq,
+                                timestamp=self._timestamp(),
+                                payload={"content": chunk.content},
+                            ),
+                        )
+                        seq += 1
                 if chunk.usage is not None:
+                    usage_sent = True
                     yield self._sse(
                         "usage",
                         StreamEvent(
@@ -106,6 +159,25 @@ class ChatService:
                     seq += 1
                 if chunk.finish_reason is not None:
                     finish_reason = chunk.finish_reason
+            if not usage_sent:
+                # Spring settles the request from this event; a provider that
+                # ignores stream_options would otherwise leave usage unset.
+                logger.warning(
+                    "provider omitted usage ai_request_id=%s; emitting zero usage",
+                    request.ai_request_id,
+                )
+                yield self._sse(
+                    "usage",
+                    StreamEvent(
+                        type="usage",
+                        ai_request_id=request.ai_request_id,
+                        request_id=resolved_request_id,
+                        seq=seq,
+                        timestamp=self._timestamp(),
+                        payload={"promptTokens": 0, "completionTokens": 0, "totalTokens": 0},
+                    ),
+                )
+                seq += 1
             yield self._sse(
                 "done",
                 StreamEvent(
@@ -186,6 +258,12 @@ class ChatService:
             "completionTokens": usage.completion_tokens,
             "totalTokens": usage.total_tokens,
         }
+
+    @staticmethod
+    def _split_content(content: str, step: int = 2) -> list[str]:
+        # Break a (possibly large, provider-batched) delta into small visible
+        # pieces so paced streaming renders incrementally instead of popping in.
+        return [content[i : i + step] for i in range(0, len(content), step)]
 
     def _sse(self, event: str, payload: StreamEvent) -> str:
         data = json.dumps(

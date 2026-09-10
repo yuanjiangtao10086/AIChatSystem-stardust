@@ -10,6 +10,7 @@ import com.example.stardust_springboot.conversation.dto.UpdateConversationReques
 import com.example.stardust_springboot.conversation.entity.ConversationStatus;
 import com.example.stardust_springboot.conversation.service.ConversationService;
 import com.example.stardust_springboot.conversation.service.ConversationSort;
+import com.example.stardust_springboot.conversation.service.ConversationTitleService;
 import com.example.stardust_springboot.conversation.service.MessageService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -37,10 +38,13 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final MessageService messageService;
+    private final ConversationTitleService conversationTitleService;
 
-    public ConversationController(ConversationService conversationService, MessageService messageService) {
+    public ConversationController(ConversationService conversationService, MessageService messageService,
+                                  ConversationTitleService conversationTitleService) {
         this.conversationService = conversationService;
         this.messageService = messageService;
+        this.conversationTitleService = conversationTitleService;
     }
 
     @PostMapping
@@ -82,6 +86,22 @@ public class ConversationController {
                                        @PathVariable String conversationId) {
         conversationService.delete(principal, conversationId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{conversationId}/title")
+    public ApiResult<ConversationView> generateTitle(@AuthenticationPrincipal AuthenticatedUser principal,
+                                                     @PathVariable String conversationId) {
+        return ApiResult.success(conversationTitleService.generate(principal, conversationId));
+    }
+
+    /**
+     * Prunes the current user's empty conversations (no messages sent yet). The conversation identified by
+     * {@code keep} is preserved so a freshly created chat the user is still looking at is never removed.
+     */
+    @DeleteMapping("/empty")
+    public ApiResult<Integer> deleteEmpty(@AuthenticationPrincipal AuthenticatedUser principal,
+                                          @RequestParam(required = false) String keep) {
+        return ApiResult.success(conversationService.deleteEmptyConversations(principal, keep));
     }
 
     @GetMapping("/{conversationId}/messages")

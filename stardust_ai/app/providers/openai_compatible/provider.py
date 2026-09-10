@@ -1,17 +1,23 @@
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
 from app.core.errors import (
+    ProviderAuthenticationError,
     ProviderError,
     ProviderProtocolError,
     ProviderRateLimitedError,
     ProviderRequestError,
+    ProviderResourceNotFoundError,
     ProviderTimeoutError,
     ProviderUnavailableError,
 )
+
+logger = logging.getLogger(__name__)
 from app.providers.base import LLMProvider
 from app.providers.types import (
     ChatRequest,
@@ -30,10 +36,21 @@ class OpenAICompatibleProvider(LLMProvider):
         api_key: str | None,
         timeout_seconds: float,
         client: httpx.AsyncClient | None = None,
+        stream_read_timeout_seconds: float | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._owns_client = client is None
+        self._timeout = timeout_seconds
+        # Idle read timeout for an open stream: the gap allowed between two consecutive bytes.
+        # It must be far larger than the overall request timeout because LLM providers often pause
+        # (reasoning, scheduling) between tokens; a short combined timeout used to abort otherwise
+        # healthy streams. Connection/write/pool keep the tighter bound.
+        self._stream_read_timeout_seconds = (
+            stream_read_timeout_seconds
+            if stream_read_timeout_seconds is not None
+            else max(timeout_seconds, 600.0)
+        )
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_seconds),
             headers={"User-Agent": "stardust-ai/0.1"},
@@ -68,15 +85,32 @@ class OpenAICompatibleProvider(LLMProvider):
             raise ProviderProtocolError() from error
 
     async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamChunk]:
+        start_ns = time.perf_counter_ns()
+        first_token_ns: int | None = None
+        stream_timeout = httpx.Timeout(
+            connect=self._timeout,
+            read=self._stream_read_timeout_seconds,
+            write=self._timeout,
+            pool=self._timeout,
+        )
         try:
             async with self._client.stream(
                 "POST",
                 f"{self._base_url}/chat/completions",
                 headers=self._headers(),
                 json=self._chat_payload(request, stream=True),
+                timeout=stream_timeout,
             ) as response:
                 self._raise_for_status(response.status_code)
                 async for line in response.aiter_lines():
+                    if first_token_ns is None and line.startswith("data:"):
+                        first_token_ns = time.perf_counter_ns()
+                        logger.info(
+                            "provider first token base_url=%s model=%s ttft_ms=%.1f",
+                            self._base_url,
+                            request.model,
+                            (first_token_ns - start_ns) / 1e6,
+                        )
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
@@ -185,6 +219,14 @@ class OpenAICompatibleProvider(LLMProvider):
     def _raise_for_status(self, status_code: int) -> None:
         if status_code < 400:
             return
+        # Configuration problems (bad key, unknown model) must stay distinguishable
+        # from upstream outages, otherwise alerting and retry policies treat them
+        # as the same transient 502.
+        logger.warning("provider rejected request status=%s", status_code)
+        if status_code in (401, 403):
+            raise ProviderAuthenticationError()
+        if status_code == 404:
+            raise ProviderResourceNotFoundError()
         if status_code == 429:
             raise ProviderRateLimitedError()
         if status_code >= 500:

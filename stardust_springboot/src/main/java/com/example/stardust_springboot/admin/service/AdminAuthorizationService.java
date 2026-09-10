@@ -22,6 +22,19 @@ public class AdminAuthorizationService {
         }
     }
 
+    /**
+     * Read authorization for viewing/moderating another user's private resources.
+     * An actor that is not a SUPER_ADMIN may not open, read or delete the private
+     * resources (conversations / messages) of a SUPER_ADMIN; SUPER_ADMIN may access everything.
+     */
+    public void requireCanView(AuthenticatedUser actor, AppUser target) {
+        if (actor.roles().contains("SUPER_ADMIN")) return;
+        Set<String> targetRoles = Set.copyOf(userRoles.findEnabledRoleCodesByUserId(target.getId()));
+        if (targetRoles.contains("SUPER_ADMIN")) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+    }
+
     public void validateRoleAssignment(AuthenticatedUser actor, Set<String> roles) {
         if (!Set.of("USER", "ADMIN", "SUPER_ADMIN").containsAll(roles) || !roles.contains("USER")) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);

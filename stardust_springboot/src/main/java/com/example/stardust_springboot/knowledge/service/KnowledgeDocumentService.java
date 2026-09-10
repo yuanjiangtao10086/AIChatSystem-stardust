@@ -106,6 +106,7 @@ public class KnowledgeDocumentService {
         DeleteTarget target = transactions.execute(status -> {
             KnowledgeDocument document = require(principal.id(), documentId);
             chunks.deleteByDocumentId(document.getId());
+            document.clearChunks();
             document.markFailed("VECTOR_REMOVED", "vector index removed by administrator");
             return new DeleteTarget(document.getUser().getPublicId(),
                     document.getKnowledgeBase().getPublicId(), document.getPublicId());

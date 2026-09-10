@@ -26,6 +26,11 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     Optional<ChatMessage> findFirstByConversationIdAndUserIdAndSequenceNoAndRoleAndDeletedAtIsNullOrderByVariantNoDescIdDesc(
             Long conversationId, Long userId, long sequenceNo, MessageRole role);
 
+    Optional<ChatMessage> findFirstByConversationIdAndUserIdAndRoleAndDeletedAtIsNullOrderBySequenceNoAscIdAsc(
+            Long conversationId, Long userId, MessageRole role);
+
+    long countByConversationIdAndRoleAndDeletedAtIsNull(Long conversationId, MessageRole role);
+
     @Query("""
             select coalesce(max(message.variantNo), -1) from ChatMessage message
             where message.conversation.id = :conversationId
@@ -51,4 +56,6 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     int failInterruptedStreams(@Param("now") Instant now);
 
     Page<ChatMessage> findByConversationIdAndDeletedAtIsNull(Long conversationId, Pageable pageable);
+
+    Optional<ChatMessage> findByPublicIdAndDeletedAtIsNull(String publicId);
 }

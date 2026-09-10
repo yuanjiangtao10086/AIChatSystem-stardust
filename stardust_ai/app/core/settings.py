@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     internal_service_token: SecretStr | None = None
     provider_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    provider_stream_read_timeout_seconds: float = Field(default=600.0, gt=0, le=3600)
+    # Demo aid only. When > 0, the chat stream is paced by sleeping this many
+    # milliseconds between emitted chunks (and large deltas are split into small
+    # pieces) so that a very fast provider still renders as visibly incremental
+    # text in the UI. Leave at 0 in production: the real network stream is used as-is.
+    stream_throttle_ms: float = Field(default=0.0, ge=0, le=200)
     openai_compatible_base_url: HttpUrl = HttpUrl("https://api.openai.com/v1")
     openai_compatible_api_key: SecretStr | None = None
     openai_compatible_default_model: str | None = None

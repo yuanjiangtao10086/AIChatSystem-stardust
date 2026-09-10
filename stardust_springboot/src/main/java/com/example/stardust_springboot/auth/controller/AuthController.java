@@ -8,6 +8,8 @@ import com.example.stardust_springboot.auth.service.AuthService;
 import com.example.stardust_springboot.auth.service.IssuedAuthSession;
 import com.example.stardust_springboot.auth.service.RefreshCookieService;
 import com.example.stardust_springboot.common.api.ApiResult;
+import com.example.stardust_springboot.common.web.ClientIpResolver;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -25,26 +27,31 @@ public class AuthController {
 
     private final AuthService authService;
     private final RefreshCookieService refreshCookieService;
+    private final ClientIpResolver clientIpResolver;
 
-    public AuthController(AuthService authService, RefreshCookieService refreshCookieService) {
+    public AuthController(AuthService authService, RefreshCookieService refreshCookieService,
+                          ClientIpResolver clientIpResolver) {
         this.authService = authService;
         this.refreshCookieService = refreshCookieService;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @PostMapping("/register")
     public ResponseEntity<ApiResult<AuthResponse>> register(
             @Valid @RequestBody RegisterRequest request,
+            HttpServletRequest servletRequest,
             HttpServletResponse response
     ) {
-        IssuedAuthSession session = authService.register(request);
+        IssuedAuthSession session = authService.register(request, clientIpResolver.resolve(servletRequest));
         refreshCookieService.write(response, session.refreshToken());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResult.success(session.response()));
     }
 
     @PostMapping("/login")
     public ApiResult<AuthResponse> login(@Valid @RequestBody LoginRequest request,
+                                         HttpServletRequest servletRequest,
                                          HttpServletResponse response) {
-        IssuedAuthSession session = authService.login(request);
+        IssuedAuthSession session = authService.login(request, clientIpResolver.resolve(servletRequest));
         refreshCookieService.write(response, session.refreshToken());
         return ApiResult.success(session.response());
     }
@@ -52,9 +59,10 @@ public class AuthController {
     @PostMapping("/refresh")
     public ApiResult<AuthResponse> refresh(
             @CookieValue(name = RefreshCookieService.COOKIE_NAME, required = false) String refreshToken,
+            HttpServletRequest servletRequest,
             HttpServletResponse response
     ) {
-        IssuedAuthSession session = authService.refresh(refreshToken);
+        IssuedAuthSession session = authService.refresh(refreshToken, clientIpResolver.resolve(servletRequest));
         refreshCookieService.write(response, session.refreshToken());
         return ApiResult.success(session.response());
     }

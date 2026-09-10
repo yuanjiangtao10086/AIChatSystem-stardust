@@ -10,7 +10,9 @@ public class AdminAuditLog extends PublicIdEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "admin_id", nullable = false, updatable = false)
     private AppUser admin;
-    @Enumerated(EnumType.STRING)
+    /** Stored as a string but read through {@link AdminAuditActionConverter} so a renamed historical
+     * value degrades to {@link AdminAuditAction#LEGACY} instead of failing the whole read. */
+    @Convert(converter = AdminAuditActionConverter.class)
     @Column(nullable = false, updatable = false, length = 64)
     private AdminAuditAction action;
     @ManyToOne(fetch = FetchType.LAZY)

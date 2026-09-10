@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.example.stardust_springboot.auth.AuthenticationIntegrationTests
--------------------------------------------------------------------------------
-Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.103 s -- in com.example.stardust_springboot.auth.AuthenticationIntegrationTests

@@ -20,7 +20,7 @@ import java.time.Clock;
 
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(SecurityProperties.class)
+@EnableConfigurationProperties({SecurityProperties.class, RateLimitProperties.class})
 public class SecurityConfiguration {
 
     @Bean
@@ -46,6 +46,8 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/error").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers("/actuator/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .anyRequest().hasRole("USER"))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

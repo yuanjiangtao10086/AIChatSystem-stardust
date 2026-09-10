@@ -51,6 +51,29 @@ class ProviderRequestError(ProviderError):
         super().__init__("PROVIDER_REQUEST_REJECTED", "provider rejected the request", 502)
 
 
+class ProviderAuthenticationError(ProviderError):
+    def __init__(self) -> None:
+        super().__init__(
+            "PROVIDER_AUTHENTICATION_FAILED",
+            "provider rejected the configured credential",
+            502,
+        )
+
+
+class ProviderResourceNotFoundError(ProviderError):
+    def __init__(self) -> None:
+        super().__init__(
+            "PROVIDER_RESOURCE_NOT_FOUND",
+            "provider model or resource does not exist",
+            502,
+        )
+
+
 class ProviderProtocolError(ProviderError):
     def __init__(self) -> None:
         super().__init__("PROVIDER_PROTOCOL_ERROR", "provider returned an invalid response", 502)
+
+
+class VectorStoreError(AiServiceError):
+    def __init__(self) -> None:
+        super().__init__("VECTOR_STORE_ERROR", "vector store operation failed", 500)

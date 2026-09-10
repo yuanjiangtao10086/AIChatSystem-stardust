@@ -100,7 +100,7 @@ Auth/User/RBAC 已在阶段 2 实现；Conversation/Message 基础 API 已在阶
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `POST` | `/api/v1/auth/register` | 注册 |
-| `POST` | `/api/v1/auth/login` | 登录 |
+| `POST` | `/api/v1/auth/login` | 登录；连续失败触发 `42901`（见 3.7） |
 | `POST` | `/api/v1/auth/refresh` | Refresh Token rotation |
 | `POST` | `/api/v1/auth/logout` | 撤销当前 refresh session |
 | `POST` | `/api/v1/auth/logout-all` | 撤销用户全部 refresh session |
@@ -187,7 +187,7 @@ Conversation 响应至少包含：`id/title/status/lastMessageAt/messageCount/cr
 | 知识库 | `/api/v1/knowledge-bases` | KB、文档与 ingestion 状态 |
 | 长期记忆 | `/api/v1/memories` | 自己的记忆 CRUD、启停与来源 |
 | 模型 | `/api/v1/ai/models` | 只返回用户可用模型及安全参数范围 |
-| 使用量 | `/api/v1/usage` | 当前用户 token/cost/quota 统计 |
+| 使用量 | `/api/v1/usage` | 当前用户 token/cost/quota 统计（阶段 12 已实现） |
 | 管理端 | `/api/v1/admin/...` | 用户、角色、文件、KB、Provider、Model、日志、审计 |
 
 管理员查看用户聊天、消息、文件或 Memory 的 API 必须校验专门权限并同步写入审计日志；普通 `ADMIN` 角色名本身不能替代细粒度 permission。
@@ -229,6 +229,249 @@ Conversation 响应至少包含：`id/title/status/lastMessageAt/messageCount/cr
 首版单文件上限默认 25 MiB、用户默认额度 1 GiB，均由服务端环境配置决定，不能以前端值作为安全边界。允许类型采用扩展名 + 声明 MIME + magic/text 验证；超限、类型拒绝与配额不足分别使用 `41301/41501/42903`。
 
 配置项：`STORAGE_PROVIDER`（默认 `local`）、`STORAGE_LOCAL_ROOT`、`STORAGE_MAX_FILE_SIZE`、`STORAGE_MAX_REQUEST_SIZE`、`STORAGE_MAX_FILE_BYTES`、`STORAGE_DEFAULT_QUOTA_BYTES`。multipart/request 限制与业务读取限制必须保持一致或更严格。
+
+### 3.6 AI Usage（阶段 12 第一批实现）
+
+| Method | Path | 请求/响应 |
+| --- | --- | --- |
+| `GET` | `/api/v1/usage` | 当前用户当前周期用量；无需参数 |
+| `GET` | `/api/v1/usage/breakdown` | 当前用户用量聚合：`by=DAY\|MODEL\|PROVIDER`，`from`/`to` 可选（默认近 30 天），仅 `COMPLETED` 计入 token 与请求数 |
+| `GET` | `/api/v1/admin/usage/breakdown` | 全站聚合，权限 `ADMIN`/`SUPER_ADMIN`，参数同上 |
+
+`UsageView`：`quotaTokens/usedTokens/reservedTokens/availableTokens/quotaCost/usedCost/reservedCost/currency/periodStart/periodEnd`。金额统一为平台结算币种，数量级见 ADR-050；`availableTokens = max(0, quota - used - reserved)`。
+
+`UsageBreakdownItem`：`key`（按日的 ISO 日期、按模型的 `modelCode`、按 Provider 的 `providerCode`）/`requestCount`/`promptTokens`/`completionTokens`/`totalTokens`。聚合实时来自 `ai_request_log`，无独立物化表；`DAY` 维度按 `createdAt` 落日分组，`MODEL`/`PROVIDER` 按对应 `code` 分组并按下发 token 倒序。时间参数使用 ISO 8601（`from`/`to` 含边界）。
+
+生成入口（`/conversations/{id}/messages:stream`、`:regenerate`、`:edit-and-resend`）在建立 SSE 前完成额度预留：
+
+- 预留量 = 上下文估算 prompt tokens + 模型 `max_output_tokens`（缺省用 `app.ai.usage.output-reserve-tokens`）。
+- 额度不足返回 HTTP 429 与 `42902 AI_QUOTA_EXCEEDED`，整个消息准备事务回滚，不创建 USER/ASSISTANT 占位消息，也不会建立 SSE。
+- 正常完成按 Provider 真实 usage 结算；主动停止与失败释放预留。语义见 ADR-051。
+
+用量不是聊天事件：SSE 不新增 usage 之外的计费字段，`usage` 事件仍只表示 Provider 上报 token。
+
+`POST /api/v1/admin/users/{id}/usage:adjust` 是管理员额度调整入口：请求体 `{"tokenDelta":120,"costDelta":"0.5","reason":"support goodwill"}`（理由必填，最长 500），返回更新后的 `AdminUserView`；负增量使 `used` 变负返回 `40003`，正增量超额返回 `42902`，越权返回 `40301`。动作写入 `admin_audit_log`，语义见 ADR-054。`AdminUserView` 新增可选 `usage` 字段（与 `UsageView` 同构）。
+
+### 3.7 限流
+
+`POST /api/v1/auth/login` 在连续失败达到 `app.security.rate-limit.login-max-failures` 后，对该客户端地址与邮箱同时冷却 `login-block`，期间即使密码正确也返回 HTTP 429 与 `42901 RATE_LIMITED`；成功登录清零计数。客户端地址只取直连地址，不信任 `X-Forwarded-For`（ADR-052）。
+
+阶段 13 起限流抽为 `RateLimiter` 接口，实现由 `app.security.rate-limit.store=memory|redis` 选择（默认 `memory`）；`redis` 模式经 Spring Data Redis + Lettuce 共享计数（Lua 原子更新），密码支持 `app.redis.password-encoded=true` 以 base64 注入。下列入口均接入限流，超限返回 `42901 RATE_LIMITED`：
+
+| 入口 | 限流维度 | 默认上限 / 窗口 / 冷却 |
+| --- | --- | --- |
+| `POST /api/v1/auth/register` | 客户端地址 | `register-max-attempts=8` / `register-window=PT10M` / `register-block=PT30M` |
+| `POST /api/v1/auth/refresh` | 客户端地址 | `refresh-max-attempts=20` / `refresh-window=PT5M` / `refresh-block=PT15M` |
+| `POST /api/v1/files`（上传） | 用户 ID | `upload-max-requests=30` / `upload-window=PT1M` / `upload-block=PT5M` |
+| `POST /api/v1/auth/login` | 客户端地址 + 邮箱 | 见上（阶段 12） |
+
+客户端真实地址由 `ClientIpResolver` 解析：默认只信任直连 `getRemoteAddr()`；当直连 peer 命中 `app.security.rate-limit.trusted-proxies`（支持精确地址或 IPv4 CIDR）时，才取 `X-Forwarded-For` 最左跳作为原始客户端，避免伪造头部将限流转移到他人（ADR-052 延续）。
+
+### 3.7.1 可观测性（阶段 13）
+
+引入 Spring Boot Actuator + Micrometer，`/actuator/prometheus` 暴露指标（仅 `ADMIN`/`SUPER_ADMIN` 可访问，`/actuator/health`、`/actuator/info` 公开）。关键计数器：
+
+| 指标 | 含义 |
+| --- | --- |
+| `auth_login_rate_limited_total` | 登录被限流次数 |
+| `auth_register_rate_limited_total` | 注册被限流次数 |
+| `auth_refresh_rate_limited_total` | 刷新被限流次数 |
+| `file_upload_rate_limited_total` | 上传被限流次数 |
+| `ai_usage_reconcile_duration_seconds` | 周期对账耗时（Timer） |
+| `ai_usage_reconcile_released_total` | 对账释放的悬挂预留数 |
+| `ai_usage_reconcile_drift_total` | 对账检测到的余额漂移账户数 |
+
+对账漂移从「仅日志」升级为可采集指标，便于在 Grafana/Prometheus 侧配置 `drift>0` 与限流命中突增告警（后端只产指标，不内置告警）。
+
+### 3.8 管理端用户管理（阶段 11）
+
+所有端点要求 `ADMIN` 或 `SUPER_ADMIN` 角色（由 `SecurityConfiguration` 的 `hasAnyRole` 强制）；`BANNED` 管理员在 JWT 过滤器层即被拒绝。凡触及用户的写操作均由 `AdminAuthorizationService.requireCanManage` 二次校验：
+
+- `ADMIN` 不能修改、封禁、停用、删除、改角色或重置密码给 `SUPER_ADMIN`；
+- `ADMIN` 不能把任何用户（含自己）提升为 `ADMIN`/`SUPER_ADMIN`（角色赋值受 `validateRoleAssignment` 限制）；
+- `ADMIN` 不能对自己执行删除/禁用等破坏性操作（服务端返回 `40301`）。
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/users` | 用户目录；`page/size` 默认 `0/20`，`search` 模糊邮箱/显示名，`status` 可选 `NORMAL/BANNED/DISABLED/DELETED`，`role` 可选 `USER/ADMIN/SUPER_ADMIN` 做角色过滤，`direction` 可选 `ASC/DESC` 控制创建时间排序（默认 `DESC`） |
+| `GET` | `/api/v1/admin/users/{id}` | 用户详情；已删除用户仍可读取以便审计核对 |
+| `POST` | `/api/v1/admin/users` | 新建用户：`{email,displayName,password(≥12),roles[]}`；写入 `USER_CREATE` 审计 |
+| `PATCH` | `/api/v1/admin/users/{id}` | 修改邮箱/显示名；写入 `USER_UPDATE` |
+| `PATCH` | `/api/v1/admin/users/{id}/status` | 状态变更：`{status,reason?,bannedUntil?}`；审计动作按迁移映射（见下） |
+| `POST` | `/api/v1/admin/users/{id}/restore` | 恢复已删除用户（重置为 `NORMAL`）；写入 `USER_RESTORE` |
+| `POST` | `/api/v1/admin/users/{id}/reset-password` | 重置密码：`{password(≥12)}`，吊销其全部会话；写入 `USER_RESET_PASSWORD` |
+| `PUT` | `/api/v1/admin/users/{id}/roles` | 角色变更：`{roles[]}`；写入 `USER_ROLES_UPDATE` |
+| `DELETE` | `/api/v1/admin/users/{id}` | 软删除；写入 `USER_DELETE` |
+
+状态变更的审计动作映射（`AdminAuditAction`）：
+
+| 目标状态 | 迁移前 | 审计动作 |
+| --- | --- | --- |
+| `BANNED` | 任意 | `USER_BAN` |
+| `DISABLED` | 任意 | `USER_DISABLE` |
+| `NORMAL` | `BANNED` | `USER_UNBAN` |
+| `NORMAL` | `DISABLED` | `USER_ENABLE` |
+| `NORMAL` | `NORMAL` | `USER_UPDATE` |
+
+`GET /admin/users` 与详情均返回 `AdminUserView`（`id/email/displayName/status/banReason/bannedUntil/lastLoginAt/roles[]/usedBytes/quotaBytes/aiRequests/aiTokens/usage/createdAt/updatedAt`）；列表为 `PageResult<AdminUserView>`，与阶段 3 公共分页一致。`usage` 与公共 `UsageView` 同构。
+
+### 3.9 管理端用户聊天管理（阶段 11B）
+
+端点（均要求 `ADMIN`/`SUPER_ADMIN`）：
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/conversations` | 会话目录；`page/size` 默认 `0/20`，`search` 模糊匹配**标题 / 用户名 / 邮箱 / 消息正文**，`userId` 精确按用户 `publicId` 过滤，`from/to`（ISO-8601）按创建时间过滤。**列表与详情适用同一授权规则**：非 `SUPER_ADMIN` 的管理员看不到 `SUPER_ADMIN` 的私人资源（ADR-063） |
+| `GET` | `/api/v1/admin/conversations/{id}` | 会话详情（内嵌首屏 100 条消息 `messages`）；写入 `VIEW_CONVERSATION` 审计 |
+| `GET` | `/api/v1/admin/conversations/{id}/messages` | 该会话消息分页（默认 `size=100`，按 `sequenceNo/variantNo` 升序）；写入 `VIEW_CHAT_MESSAGES` 审计 |
+| `DELETE` | `/api/v1/admin/conversations/{id}` | 软删除会话；写入 `DELETE_CONVERSATION` 审计 |
+| `DELETE` | `/api/v1/admin/messages/{id}` | 软删除单条消息（同步递减会话 `message_count`）；写入 `DELETE_CHAT_MESSAGE` 审计 |
+
+审计（`AdminAuditLog` 由 Service/Audit 层在**读取/删除时自动写入**，Vue 不自行提交审计事件）：`action ∈ {VIEW_CONVERSATION, VIEW_CHAT_MESSAGES, DELETE_CONVERSATION, DELETE_CHAT_MESSAGE}`，并记录 `admin_id / target_user_id / target_resource_type`（`CONVERSATION` 或 `CHAT_MESSAGE`）`/ target_resource_id / request_id / ip / user_agent / created_at`。
+
+权限：
+- `USER`：禁止访问 `/api/admin/**`（`SecurityConfiguration` 的 `hasAnyRole` 强制）。
+- `ADMIN`：可查看普通 `USER` 的聊天详情与消息。
+- `ADMIN`：**禁止**查看/删除 `SUPER_ADMIN` 的私人聊天资源（`AdminAuthorizationService.requireCanView` 强制，返回 `40301`），除非 `architecture.md` 另有不同明确规则。**列表同样应用该规则**：`SUPER_ADMIN` 的会话不会出现在非 `SUPER_ADMIN` 管理员的列表结果中，因此不会出现「列表可见、点击被拒」（ADR-063）。
+- `SUPER_ADMIN`：按系统最高权限规则执行，可查看全部。
+- 被封禁（`BANNED`）的管理员在 JWT 过滤器层即被拒绝（`40302`）。
+
+复用：管理员查询直接复用 `Conversation` / `ChatMessage` 既有 Entity 与 Repository，并经 `AdminResourceService` 内的独立查询方法提供，**不污染普通用户接口**、不新建 `AdminConversation` Entity。列表页仅展示元数据，完整消息内容仅在该会话详情中呈现。
+
+### 3.10 管理端文件与云盘管理（阶段 11C）
+
+端点（均要求 `ADMIN`/`SUPER_ADMIN`）：
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/files` | 文件目录；`page/size` 默认 `0/20`，`search` 按文件名模糊匹配，`userSearch` 按**用户名 / 邮箱**模糊匹配，`userId` 按用户 `publicId` 精确过滤，`mime` 为检测 MIME 前缀（如 `image/`），`status ∈ {UPLOADING, AVAILABLE, DELETING, FAILED, DELETED}`，`minSize`/`maxSize` 为**字节**范围，`from/to`（ISO-8601）按上传时间过滤 |
+| `GET` | `/api/v1/admin/files/{id}` | 文件详情（元数据 + 所属用户 + 引用统计）；写入 `VIEW_USER_FILE` 审计 |
+| `GET` | `/api/v1/admin/files/{id}/download` | 下载文件内容（经 `StorageService` 流式返回，`Content-Disposition: attachment`）；写入 `FILE_DOWNLOAD` 审计 |
+| `DELETE` | `/api/v1/admin/files/{id}` | 删除违规文件（经 `StorageService` 删除对象 + 软删除 + 释放配额）；写入 `FILE_DELETE` 审计 |
+
+响应体：列表项为 `AdminFileView`（`id/userId/userEmail/userName/name/mime/sizeBytes/status/referenced/createdAt`）；详情为 `AdminFileDetailView`，额外含 `declaredMime/detectedMime/extension/sha256/storageProvider/metadataJson/attachmentCount/knowledgeDocumentCount/referenced/updatedAt`。
+
+安全约束：
+
+- **绝不返回 `object_key` 与任何服务器内部绝对路径**；下载与预览只能以文件 `publicId` 寻址，统一经 `StorageService` 打开流，Controller 不接触本地文件路径。
+- **路径穿越**：object key 只允许服务端生成；`AdminResourceService.requireSafeObjectKey` 在打开/删除前拒绝含 `..`、以 `/` 开头或含反斜杠的 key（纵深防御，服务端白名单校验由 `LocalStorageProvider.SAFE_KEY` 再做一次）。
+- **引用保护**：文件仍被 `chat_message_attachment` 或 `knowledge_document` 引用时，删除返回 `409 RESOURCE_STATE_CONFLICT`；详情以 `attachmentCount`/`knowledgeDocumentCount`/`referenced` 暴露引用情况。
+- 仅 `AVAILABLE` 文件可下载/删除（其余状态由 `FilePersistenceService` 状态机拒绝）。
+
+审计（`AdminAuditLog` 由 Service 层自动写入，Vue 不自行提交）：`action ∈ {VIEW_USER_FILE, FILE_DOWNLOAD, FILE_DELETE}`，`target_resource_type = USER_FILE`，并记录 `admin_id / target_user_id / target_resource_id / request_id / ip / user_agent / created_at`。
+
+权限：
+
+- `USER`：禁止访问 `/api/admin/**`（`SecurityConfiguration` 的 `hasAnyRole` 强制）。
+- `ADMIN`：可查看/下载/删除普通 `USER` 的文件。
+- `ADMIN`：**禁止**查看/下载/删除 `SUPER_ADMIN` 的私人文件（`requireCanView` 强制，返回 `40301`），延续 ADR-058 的同级最小权限规则。
+- `SUPER_ADMIN`：按系统最高权限规则执行。
+- 被封禁（`BANNED`）的管理员在 JWT 过滤器层即被拒绝（`40302`）。
+
+复用：文件元数据与配额沿用 `user_file` / `user_storage_usage` 与 `FilePersistenceService`，物理对象访问沿用 `StorageService`，**不新增表、不新增 Storage 实现、不绕过既有删除状态机**。
+
+### 3.11 管理端知识库与 RAG 管理（阶段 11D）
+
+端点（均要求 `ADMIN`/`SUPER_ADMIN`）：
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/knowledge-bases` | 知识库列表；`page/size` 默认 `0/20`，`search` 按名称模糊匹配，`userSearch` 按**用户名 / 邮箱**模糊匹配，`userId` 按用户 `publicId` 精确过滤，`status ∈ {ACTIVE, DELETED}` |
+| `GET` | `/api/v1/admin/knowledge-bases/{id}` | 知识库详情（所属用户 + 处理概况 + 首屏 50 条文档）；写入 `VIEW_KNOWLEDGE_BASE` 审计 |
+| `GET` | `/api/v1/admin/knowledge-documents` | 文档列表；`knowledgeBaseId` / `userId` 精确过滤，`search`（文件名）与 `userSearch`（用户名 / 邮箱）模糊匹配，`status ∈ {UPLOADED, PARSING, PARSED, EMBEDDING, READY, FAILED}` |
+| `POST` | `/api/v1/admin/knowledge-documents/{id}/retry` | 重新处理 `FAILED` 文档（重新解析 + 向量化）；写入 `RAG_DOCUMENT_RETRY` 审计 |
+| `DELETE` | `/api/v1/admin/knowledge-documents/{id}` | 删除文档（分块 + 元数据 + 向量索引）；写入 `RAG_DOCUMENT_DELETE` 审计 |
+| `DELETE` | `/api/v1/admin/knowledge-documents/{id}/vectors` | 仅删除向量数据，文档记录保留为 `FAILED` / `VECTOR_REMOVED`；写入 `RAG_VECTOR_REMOVE` 审计 |
+
+**三层边界**：Vue 只调用 `/api/v1/admin/**`；需要 AI 处理的操作（重新处理、删除向量）由 `KnowledgeDocumentService` 经 `RagGateway` 调用 Python AI 服务，**Vue 永不直接访问 Python**，Python 也仍不持有用户身份与业务库（ADR-002/ADR-047）。
+
+响应体：列表项为 `AdminKnowledgeBaseView`（`id/userId/userEmail/userName/name/status/createdAt/updatedAt`）；详情为 `AdminKnowledgeBaseDetailView`，额外含 `description / documentCount / readyDocumentCount / failedDocumentCount / totalChunks / documents`；文档行为 `AdminKnowledgeDocumentView`，含 `knowledgeBaseName / fileId / filename / mimeType / status / chunkCount / processingVersion / parserType / embeddingProvider / embeddingModel / errorCode / errorMessage / startedAt / completedAt / createdAt / updatedAt`。
+
+语义与一致性：
+
+- 文档状态机沿用 `UPLOADED → PARSING → PARSED → EMBEDDING → READY`，异常收敛为 `FAILED`（`errorCode` + `errorMessage` 即管理端展示的失败原因）。
+- `chunkCount` 始终与真实 `document_chunk` 行一致：重新处理前清零、`READY` 时写入实际分块数、删除向量后清零（`KnowledgeDocument.clearChunks()`）。
+- 删除向量只移除索引与分块，保留文档记录以便审计追溯；删除文档则软删除文档并移除分块与向量。
+- 重新处理仅接受 `FAILED` 文档，其余状态返回 `409 RESOURCE_STATE_CONFLICT`。
+
+审计（`AdminAuditLog` 由 Service 层自动写入，Vue 不自行提交）：`action ∈ {VIEW_KNOWLEDGE_BASE, RAG_DOCUMENT_RETRY, RAG_DOCUMENT_DELETE, RAG_VECTOR_REMOVE}`，`target_resource_type` 为 `KNOWLEDGE_BASE` 或 `KNOWLEDGE_DOCUMENT`，并记录 `admin_id / target_user_id / target_resource_id / request_id / ip / user_agent / created_at`。
+
+权限：
+
+- `USER`：禁止访问 `/api/admin/**`（`SecurityConfiguration` 的 `hasAnyRole` 强制）。
+- `ADMIN`：可查看/重试/删除普通 `USER` 的知识库与文档。
+- `ADMIN`：**禁止**查看、重新处理、删除 `SUPER_ADMIN` 的私人知识库与文档（`requireCanView` 强制，返回 `40301`），延续 ADR-058/ADR-059 的同级最小权限规则。
+- `SUPER_ADMIN`：按系统最高权限规则执行。
+- 被封禁（`BANNED`）的管理员在 JWT 过滤器层即被拒绝（`40302`）。
+
+复用：直接复用 `knowledge_base` / `knowledge_document` / `document_chunk` 与 `KnowledgeBaseService` / `KnowledgeDocumentService`，**不新增表、不新增 Python 入口**，管理端只是同一状态机的受审计调用方。
+
+### 3.12 管理端 AI 服务商与模型（阶段 11E）
+
+端点（均要求 `ADMIN`/`SUPER_ADMIN`）：
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/ai/providers` | 服务商列表（按创建时间升序），含 `modelCount` |
+| `POST` | `/api/v1/admin/ai/providers` | 新建服务商；`credentialRef` 只接受**密钥引用** |
+| `PUT` | `/api/v1/admin/ai/providers/{id}` | 更新服务商；`code` 不可变（改码返回 `40901`），`credentialRef` 留空保持原值 |
+| `PATCH` | `/api/v1/admin/ai/providers/{id}/status` | `{"enabled":true\|false}` |
+| `DELETE` | `/api/v1/admin/ai/providers/{id}` | 硬删除；仍拥有模型或已产生请求日志（`ON DELETE RESTRICT`）返回 `40901` |
+| `GET` | `/api/v1/admin/ai/models` | 模型目录（含 `providerName`，按服务商代码 + 排序值排列） |
+| `POST` | `/api/v1/admin/ai/models` | 新建模型；`providerId` 必填（模型必须关联服务商） |
+| `PUT` | `/api/v1/admin/ai/models/{id}` | 更新模型；`code` 与 `providerId` 不可变（改动返回 `40901`） |
+| `PATCH` | `/api/v1/admin/ai/models/{id}/status` | 启停模型；停用同时清除默认标记 |
+| `PATCH` | `/api/v1/admin/ai/models/{id}/default` | `{"defaultModel":true\|false}`；同一模型类型内唯一 |
+| `PATCH` | `/api/v1/admin/ai/models/{id}/order` | `{"direction":"UP"\|"DOWN"}`；返回重排后的完整模型目录 |
+| `DELETE` | `/api/v1/admin/ai/models/{id}` | 硬删除模型；已产生请求日志返回 `40901` |
+| `GET` | `/api/v1/admin/ai/requests` | 上游调用日志分页（阶段 11 既有能力，支持 `userId/status/provider/model` 过滤） |
+
+**密钥只写不读（本阶段核心契约）**：
+
+- `ProviderView` 只暴露 `hasApiKey`（布尔）与 `maskedApiKey`（如 `sk-****1234`）；**不含 `credentialRef`，也没有任何端点可读回明文密钥**，`AiProvider.getCredentialRef()` 另加 `@JsonIgnore` 作为第二道防线。
+- `ProviderRequest.credentialRef` 只接受引用形式（`^$|^[a-z][a-z0-9-]{1,15}:[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,200}$`）：`env:OPENAI_API_KEY`、`vault:...` 合法；直接粘贴裸 Key（`sk-...`）返回 `40001`，不会写入数据库。沿用 ADR-016 的引用式凭据，**不新增任何自制加密算法**。
+- 掩码来自**运行时解析**（`ProviderCredentialResolver` 默认实现按 `env:NAME` 读 Spring `Environment`），数据库只存引用；未配置或部署环境未提供可解析值时 `maskedApiKey` 为空（前端显示「已配置」/「未配置」）。
+- 编辑时 `credentialRef` 留空 = 保持原密钥不变；填新引用 = 替换，并在审计中以布尔 `credentialReplaced` 体现。
+- 审计元数据只含 `credentialConfigured` / `credentialReplaced` / `timeoutSeconds` / `code` 等非敏感字段，**绝不记录引用名或密钥**。
+
+**默认模型与排序语义**：
+
+- `defaultModel` 在同一 `type` 内唯一：设置新默认会清除同类型旧默认；仅 `ENABLED` 模型可设为默认（否则 `40901`）；停用模型立即清除其默认标记，保证用户侧不会把停用模型当默认。
+- 新建的服务商与模型默认 `DISABLED`，必须显式启用；用户侧 `GET /api/v1/ai/models` 只返回「服务商已启用 + 模型已启用」的 `CHAT` 模型，并新增 `defaultModel` 字段供前端预选。
+- 排序先把同服务商模型规范化为 `10/20/30…` 再交换相邻两项，因此手工改过排序值或值重复时移动仍确定；已在首位继续上移是幂等空操作而非报错。
+
+**JSON 形状与向后兼容**：`capabilities` 读写为结构化对象 `{"streaming":…,"vision":…,"reasoning":…,"embedding":…}`，读取时兼容历史数组式 `["streaming","reasoning"]`；模型参数读写为 `{defaultTemperature,defaultTopP,defaultMaxOutputTokens}`，读取时兼容历史嵌套式 `{"temperature":{"default":0.7}}`；`non_secret_config_json` 存 `{timeoutSeconds,connectTimeoutSeconds}`。损坏或空值退化为「未配置」，不会让管理页 500。
+
+**审计**（由 Service 层写入，Vue 不自行提交）：`action ∈ {PROVIDER_CREATE, PROVIDER_UPDATE, PROVIDER_STATUS_UPDATE, PROVIDER_DELETE, MODEL_CREATE, MODEL_UPDATE, MODEL_STATUS_UPDATE, MODEL_DEFAULT_UPDATE, MODEL_REORDER, MODEL_DELETE}`，`target_resource_type ∈ {AI_PROVIDER, AI_MODEL}`。
+
+**权限**：`USER` 访问 `/api/v1/admin/**` 返回 `40301`；`BANNED` 管理员在 JWT 过滤器层被拒（`40302`）；`ADMIN` 与 `SUPER_ADMIN` 均可管理。AI 目录是**平台级资源**（不归属某个用户），因此不适用 ADR-058 的同级所有者限制，授权完全由角色决定。
+
+**边界（ADR-032）**：控制台只负责目录与启停/默认开关；Provider 的连接与调用事实（Base URL、密钥、超时、默认模型）仍由 Python AI 服务的 `STARDUST_AI_*` 设置决定，Vue 与 Spring 不会把控制台配置直接下发给 Python。
+
+### 3.13 管理端总览、审计日志与 AI 请求日志（阶段 11F）
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/dashboard` | 只读聚合总览（无物化表，实时统计） |
+| `GET` | `/api/v1/admin/audit-logs` | 审计日志分页；`page/size` 默认 `0/20`，`adminId` 按管理员 `publicId`、`action` 按 `AdminAuditAction`、`targetType` 按 `target_resource_type`、`from/to` 为 ISO 8601 时间区间 |
+| `GET` | `/api/v1/admin/ai/requests` | AI 调用日志分页；`userId` 按用户 `publicId`、`status ∈ {PENDING, STREAMING, COMPLETED, STOPPED, FAILED}`、`provider`/`model` 按 code、`from/to` 为 ISO 8601 时间区间 |
+| `GET` | `/api/v1/admin/ai/requests/{requestId}` | 单条调用详情（耗时、token、错误码），不存在返回 `40401` |
+
+`Dashboard` 响应：`totalUsers/todayNewUsers/activeUsers/conversations/messages/aiRequests/totalTokens/files/storageBytes/ragDocuments/systemErrors/enabledProviders/enabledModels/hourly/recentAudits/recentFailures`。
+
+- `hourly`：**固定 24 个元素**、按 UTC 逐小时分桶、由旧到新，元素为 `{bucketStart, requests, failures}`；空平台返回 24 个零值桶而不是省略，前端因此无需补齐。
+- `recentAudits`（最新 5 条 `AuditView`）与 `recentFailures`（最新 5 条 `AiRequestView`）为仪表盘的活动与故障视图，完整列表走上面的分页接口。
+- 分桶在 Java 内完成（仓库只取 `createdAt` 与 `status` 两列），因此不依赖 MySQL/H2 的 `hour()` 方言，也不受 JDBC 会话时区影响（ADR-062）。
+
+语义与约束：
+
+- 三个接口**全部只读**：审计日志与调用日志没有任何写入、修改或删除入口，审计行只能由各业务 Service 在动作发生时写入（ADR-058 血脉），前端无法伪造或抹除。
+- 时间区间为**闭区间**（`createdAt >= from and createdAt <= to`），缺省即不限；`from`/`to` 与既有会话/文件筛选一致，直接接受 `Instant` 文本（如 `2026-09-11T08:00:00Z`）。
+- 排序：审计日志按 `created_at desc, id desc`；调用日志按 `created_at desc`。
+
+权限：`USER` 返回 `40301`；`BANNED` 管理员在 JWT 过滤器层被拒（`40302`）；`ADMIN` 与 `SUPER_ADMIN` 均可读取。审计日志是平台级留痕，不适用 `requireCanView` 的所有者限制（ADR-058 只约束跨用户的私人资源）。
+
+数据库：`V12__index_request_and_audit_time.sql` 只增加 `ai_request_log(created_at, id)` 与 `admin_audit_log(created_at, id)` 两个索引，用于让时间区间筛选走索引而非全表扫描；不新增表、不改字段。
 
 ## 4. Vue → Spring Boot SSE
 

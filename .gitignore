@@ -26,6 +26,10 @@ data/
 *.iml
 *.ipr
 
+### IntelliJ IDEA ###
+.workbuddy/
+
+
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
@@ -38,3 +42,37 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Build output / IDE output ###
+out/
+bin/
+build/
+
+### Java build artifacts ###
+*.class
+*.jar
+*.war
+*.dumpstream
+HELP.md
+
+### Node ###
+.npmcache/
+.eslintcache
+*.tsbuildinfo
+
+### Logs ###
+*.log
+logs/
+
+### OS files ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### Local tool / session data ###
+.codebuddy/
+*.err
+*.local
+*.tmp
+*.bak
+*.swp

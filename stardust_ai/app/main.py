@@ -30,6 +30,7 @@ def build_provider_registry(settings: Settings) -> ProviderRegistry:
         base_url=str(settings.openai_compatible_base_url).rstrip("/"),
         api_key=None if key is None else key.get_secret_value(),
         timeout_seconds=settings.provider_timeout_seconds,
+        stream_read_timeout_seconds=settings.provider_stream_read_timeout_seconds,
     )
     return ProviderRegistry({"openai-compatible": provider})
 
@@ -119,7 +120,21 @@ def error_response(
     return JSONResponse(status_code=status_code, content=payload.model_dump(by_alias=True))
 
 
-app = create_app()
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str) -> Any:
+    """Build the ASGI application on first access.
+
+    Keeping this lazy means importing ``app.main`` (tests, tooling) no longer
+    opens sqlite and writes the vector-store file as an import side effect.
+    """
+    global _app
+    if name == "app":
+        if _app is None:
+            _app = create_app()
+        return _app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def run() -> None:

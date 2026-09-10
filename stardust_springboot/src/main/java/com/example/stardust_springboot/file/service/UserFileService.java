@@ -2,6 +2,7 @@ package com.example.stardust_springboot.file.service;
 
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.common.api.PageResult;
+import com.example.stardust_springboot.common.ratelimit.EndpointRateGuard;
 import com.example.stardust_springboot.common.exception.BusinessException;
 import com.example.stardust_springboot.common.exception.ErrorCode;
 import com.example.stardust_springboot.common.id.PublicIdGenerator;
@@ -33,6 +34,7 @@ public class UserFileService {
     private final StorageService storage;
     private final Clock clock;
     private final KnowledgeDocumentRepository knowledgeDocuments;
+    private final EndpointRateGuard endpointGuards;
 
     public UserFileService(UserFileRepository fileRepository,
                            UserStorageUsageRepository usageRepository,
@@ -40,7 +42,8 @@ public class UserFileService {
                            FileTypePolicy typePolicy,
                            StorageService storage,
                            Clock clock,
-                           KnowledgeDocumentRepository knowledgeDocuments) {
+                           KnowledgeDocumentRepository knowledgeDocuments,
+                           EndpointRateGuard endpointGuards) {
         this.fileRepository = fileRepository;
         this.usageRepository = usageRepository;
         this.persistence = persistence;
@@ -48,9 +51,11 @@ public class UserFileService {
         this.storage = storage;
         this.clock = clock;
         this.knowledgeDocuments = knowledgeDocuments;
+        this.endpointGuards = endpointGuards;
     }
 
-    public FileView upload(AuthenticatedUser principal, MultipartFile multipart) {
+    public FileView upload(AuthenticatedUser principal, MultipartFile multipart, String clientIp) {
+        endpointGuards.guardUpload(principal.id(), clientIp);
         ValidatedUpload upload = typePolicy.validate(multipart);
         String storageName = PublicIdGenerator.newUlid() + "." + upload.extension();
         var date = clock.instant().atZone(ZoneOffset.UTC);

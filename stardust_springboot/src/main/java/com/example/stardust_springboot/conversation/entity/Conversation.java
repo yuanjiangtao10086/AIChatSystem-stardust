@@ -74,6 +74,10 @@ public class Conversation extends SoftDeleteEntity {
         }
     }
 
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
     public long appendMessage(Instant occurredAt) {
         long allocated = nextSequenceNo;
         nextSequenceNo++;
@@ -87,12 +91,20 @@ public class Conversation extends SoftDeleteEntity {
         lastMessageAt = occurredAt;
     }
 
+    public void decrementMessageCount() {
+        if (messageCount > 0) messageCount--;
+    }
+
     public void touchLastMessageAt(Instant occurredAt) {
         lastMessageAt = occurredAt;
     }
 
     public AppUser getUser() {
         return user;
+    }
+
+    public AiModel getDefaultModel() {
+        return defaultModel;
     }
 
     public String getTitle() {

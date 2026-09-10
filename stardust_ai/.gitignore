@@ -6,3 +6,27 @@
 __pycache__/
 *.py[cod]
 data/
+
+# test / tooling caches
+.pytest_tmp/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.venv*/
+
+# packaging / build
+*.egg-info/
+dist/
+build/
+*.pyc
+
+# runtime data / logs
+*.sqlite3
+*.db
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.example.stardust_springboot.ai.AiStreamingIntegrationTests
--------------------------------------------------------------------------------
-Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 27.62 s -- in com.example.stardust_springboot.ai.AiStreamingIntegrationTests
