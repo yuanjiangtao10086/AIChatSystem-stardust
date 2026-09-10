@@ -5,7 +5,62 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="b35270e3-3662-4b6f-a54a-2815bab79d48" name="更改" comment="first commit&#10;init">
-      <change afterPath="$PROJECT_DIR$/.idea/ApifoxUploaderProjectSetting.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/dataSources.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/AiChatSystem.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/AiChatSystem.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_ai/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_ai/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_springboot/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_springboot/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_springboot/docs/ai-chat/progress.md" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_springboot/docs/ai-chat/progress.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_springboot/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_springboot/pom.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_springboot/src/main/resources/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_springboot/src/main/resources/application.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_springboot/target/classes/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_springboot/target/classes/application.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/public/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/public/index.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/App.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/App.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/api/admin.ts" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/api/admin.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/AuthPanel.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/AuthPanel.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/HelloWorld.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/HelloWorld.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminAi.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminAi.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminAudit.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminAudit.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminConversations.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminConversations.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminDashboard.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminDashboard.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminFiles.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminFiles.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminRag.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminRag.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminShell.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminShell.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminUsers.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/admin/AdminUsers.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatAttachment.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatAttachment.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatCodeBlock.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatCodeBlock.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatComposer.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatComposer.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatHeader.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatHeader.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatMarkdown.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatMarkdown.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatMessage.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatMessage.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatMessageList.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatMessageList.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatSidebar.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ChatSidebar.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ConversationItem.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ConversationItem.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ConversationList.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ConversationList.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/KnowledgeBaseSelector.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/KnowledgeBaseSelector.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/MessageAttachments.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/MessageAttachments.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/ModelSelector.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/ModelSelector.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/chat/StreamingCursor.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/chat/StreamingCursor.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/files/FileDetailPanel.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/files/FileDetailPanel.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/files/FileDropzone.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/files/FileDropzone.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/files/FileTable.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/files/FileTable.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/files/StorageMeter.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/files/StorageMeter.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/knowledge/DocumentPipelineList.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/knowledge/DocumentPipelineList.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/components/knowledge/KnowledgeBaseList.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/components/knowledge/KnowledgeBaseList.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/composables/useChatWorkspace.ts" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/composables/useChatWorkspace.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/styles.scss" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/styles.scss" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/types/admin.ts" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/types/admin.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/AboutView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/AboutView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/AdminView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/AdminView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/ChatView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/ChatView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/FilesView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/FilesView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/ForbiddenView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/ForbiddenView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/KnowledgeView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/KnowledgeView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/LoginView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/LoginView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/MemoriesView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/MemoriesView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/ProfileView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/ProfileView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/src/views/RegisterView.vue" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/src/views/RegisterView.vue" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stardust_vue/vue.config.js" beforeDir="false" afterPath="$PROJECT_DIR$/stardust_vue/vue.config.js" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -34,6 +89,9 @@
     &quot;accountId&quot;: &quot;0f508952-0ed5-4320-b7e1-0c652fc432cb&quot;
   }
 }</component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$PROJECT_DIR$/stardust_springboot/pom.xml" root0="FORCE_HIGHLIGHTING" />
+  </component>
   <component name="MavenImportPreferences">
     <option name="generalSettings">
       <MavenGeneralSettings>
@@ -71,13 +129,31 @@
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "org.jetbrains.plugins.github.ui.GithubSettingsConfigurable",
+    "settings.editor.selected.configurable": "MavenSettings",
     "to.speed.mode.migration.done": "true",
+    "ts.external.directory.path": "E:\\daxuexuexiziliao\\keshe\\AiChatSystem\\stardust_vue\\node_modules\\typescript\\lib",
     "vue.rearranger.settings.migration": "true",
     "应用程序.StardustSpringbootApplication.executor": "Run"
+  },
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "mysql"
+    ]
   }
 }]]></component>
   <component name="RunManager" selected="应用程序.StardustSpringbootApplication">
+    <configuration name="StardustSpringbootApplication (1)" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
+      <option name="MAIN_CLASS_NAME" value="com.example.stardust_springboot.StardustSpringbootApplication" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="com.example.stardust_springboot.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="StardustSpringbootApplication" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
       <option name="MAIN_CLASS_NAME" value="com.example.stardust_springboot.StardustSpringbootApplication" />
       <module name="AiChatSystem" />
@@ -111,6 +187,7 @@
     <recent_temporary>
       <list>
         <item itemvalue="应用程序.StardustSpringbootApplication" />
+        <item itemvalue="应用程序.StardustSpringbootApplication (1)" />
       </list>
     </recent_temporary>
   </component>
@@ -132,7 +209,7 @@
       <workItem from="1788787065825" duration="3313000" />
       <workItem from="1788834972783" duration="1843000" />
       <workItem from="1788940666239" duration="1748000" />
-      <workItem from="1788942458489" duration="973000" />
+      <workItem from="1788942458489" duration="13868000" />
     </task>
     <task id="LOCAL-00001" summary="first commit&#10;init">
       <option name="closed" value="true" />
@@ -166,7 +243,15 @@
       <option name="project" value="LOCAL" />
       <updated>1788943131506</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="first commit&#10;init">
+      <option name="closed" value="true" />
+      <created>1788943548084</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1788943548084</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -186,5 +271,9 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="first commit&#10;init" />
     <option name="LAST_COMMIT_MESSAGE" value="first commit&#10;init" />
+  </component>
+  <component name="XSLT-Support.FileAssociations.UIState">
+    <expand />
+    <select />
   </component>
 </project>

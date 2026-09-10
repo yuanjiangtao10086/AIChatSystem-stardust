@@ -1,7 +1,24 @@
 # AI Chat SaaS 开发进度
 
 > 最近更新：2026-09-09  
-> 当前阶段：阶段 10「用户知识库与 RAG」已完成；**未实现 Admin/计费**
+> 当前阶段：阶段 10「用户知识库与 RAG」已完成；**前端 UI 仿 ChatGPT 风格 + 全量中文化**已完成；**未实现 Admin/计费**
+
+## 前端 UI 重构（仿 ChatGPT 风格 + 全量中文化）
+
+状态：Completed（纯 UI 层，未触碰业务逻辑/API/数据库）
+
+- [x] 重写 `stardust_vue/src/styles.scss`：统一 CSS 变量为浅灰侧栏 / 白主区 / 黑色主操作 / 圆角胶囊；全局字体优先中文（PingFang SC、微软雅黑）。
+- [x] `App.vue` 顶栏中文化（聊天/云盘/记忆/知识库/个人资料/管理后台/退出登录）。
+- [x] 聊天工作区仿 ChatGPT：`ChatSidebar` 改浅灰栏 + 新对话 + 搜索 + 历史列表 + 底部用户菜单；`ChatHeader` 模型/知识库胶囊按钮；欢迎页中央「今天有什么计划？」；`ChatComposer` 圆角胶囊输入框 + 黑色圆形发送 / 停止按钮。
+- [x] `ChatMessage` 用户消息右侧灰色气泡、AI 全宽 markdown，标签「你 / 星语」，操作按钮「复制/已复制、编辑、重新生成」，状态文案中文映射。
+- [x] 全部视图/组件可见文案中文化：Login、Register、Files、FileTable/Dropzone/DetailPanel/StorageMeter、Knowledge、KnowledgeBaseList/DocumentPipelineList、Memories、Profile、Forbidden、About、AdminView + AdminShell/Dashboard/Users/Conversations/Files/Rag/Ai/Audit。
+- [x] `index.html` 设 `lang="zh-CN"`、标题「星语 AI」、noscript 中文。
+- [x] 日期格式器统一为 `zh-CN`。
+
+### 验证
+
+- Vue：`npm run typecheck` 通过（无类型错误）；`npm run lint -- --fix` 全部自动修复后通过；IDE 诊断 0 error。
+- `npm run build` 因耗时长未等待，typecheck + lint 已保证质量；建议本地手动执行 `npm run build` 出包验证。
 
 ## 阶段 10：用户知识库与 RAG
 

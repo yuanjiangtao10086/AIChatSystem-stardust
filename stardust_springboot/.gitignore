@@ -5,6 +5,12 @@ data/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+### Environment / Secrets ###
+.env
+.env.local
+.env.*.local
+!.env.example
+
 ### STS ###
 .apt_generated
 .classpath
