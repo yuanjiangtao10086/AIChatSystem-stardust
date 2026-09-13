@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     openai_compatible_api_key: SecretStr | None = None
     openai_compatible_default_model: str | None = None
     openai_compatible_embedding_model: str | None = None
+    # Chat attachments: Spring ships content, this service only enforces the rendering budget.
+    attachment_max_text_chars: int = Field(default=60_000, ge=1_000, le=400_000)
+    attachment_image_detail: str = Field(default="auto", pattern="^(auto|low|high)$")
     rag_max_document_bytes: int = Field(default=26_214_400, gt=0, le=52_428_800)
     rag_chunk_chars: int = Field(default=1800, ge=256, le=8000)
     rag_chunk_overlap_chars: int = Field(default=180, ge=0, le=2000)

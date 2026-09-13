@@ -252,9 +252,14 @@ export function useChatWorkspace() {
     }
   };
 
-  const run = async (nextAction: ChatAction): Promise<void> => {
+  /**
+   * @returns `true` when the request reached the backend and produced a stream outcome (including a
+   * server-side error), `false` when it was never delivered or was aborted. Callers use this to
+   * decide whether the composer must restore the draft and attachments.
+   */
+  const run = async (nextAction: ChatAction): Promise<boolean> => {
     if (!conversationId.value || !selectedModelId.value || sending.value)
-      return;
+      return false;
     const targetConversationId = conversationId.value;
     // A conversation with no messages loaded yet means this SEND is the very first message.
     const isFirstUserMessage =
@@ -286,6 +291,7 @@ export function useChatWorkspace() {
       allMessages.value.push(tempUser);
     }
     let aborted = false;
+    let delivered = true;
     try {
       const onEvent = (event: AiStreamEvent) => {
         if (conversationId.value !== targetConversationId) return;
@@ -323,6 +329,7 @@ export function useChatWorkspace() {
         aborted = true;
       } else {
         error.value = describeError(value);
+        delivered = false;
       }
     } finally {
       sending.value = false;
@@ -344,12 +351,13 @@ export function useChatWorkspace() {
         await applyAutoTitle(targetConversationId);
       }
     }
+    return delivered;
   };
 
   const send = (
     content: string,
     attachments: FileReference[] = []
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const parent = messages.value[messages.value.length - 1];
     return run({
       type: "SEND",
@@ -358,13 +366,13 @@ export function useChatWorkspace() {
       parentMessageId: parent?.id,
     });
   };
-  const regenerate = (target: ChatMessage): Promise<void> =>
+  const regenerate = (target: ChatMessage): Promise<boolean> =>
     run({ type: "REGENERATE", target });
   const editAndResend = (
     target: ChatMessage,
     content: string,
     attachments: FileReference[] = []
-  ): Promise<void> =>
+  ): Promise<boolean> =>
     run({ type: "EDIT_AND_RESEND", target, content, attachments });
 
   const stop = async (): Promise<void> => {

@@ -117,10 +117,26 @@ export default defineComponent({
       emit("cancel-edit");
       nextTick(resize);
     };
+    // Puts a failed submission back into the composer. Called by the chat view when the request
+    // never reached the backend, so a failed send costs neither the text nor the picked files.
+    const restore = (content: string, files: FileReference[]) => {
+      draft.value = content;
+      attachments.value = [...files];
+      nextTick(resize);
+    };
     const remove = (id: string) => {
       attachments.value = attachments.value.filter((file) => file.id !== id);
     };
-    return { attachments, draft, input, resize, submit, cancelEdit, remove };
+    return {
+      attachments,
+      draft,
+      input,
+      resize,
+      submit,
+      cancelEdit,
+      remove,
+      restore,
+    };
   },
 });
 </script>

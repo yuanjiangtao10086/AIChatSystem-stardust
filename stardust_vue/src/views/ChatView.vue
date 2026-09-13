@@ -45,6 +45,7 @@
     </p>
     <ChatComposer
       v-if="chat.conversationId.value"
+      ref="composer"
       :sending="chat.sending.value"
       :model-available="Boolean(chat.selectedModelId.value)"
       :editing-message="editingMessage"
@@ -64,6 +65,7 @@
 </template>
 <script lang="ts">
 import { computed, defineComponent, ref } from "vue";
+import type { ComponentPublicInstance } from "vue";
 import { useStore } from "vuex";
 import { ChatMessage } from "@/types/conversation";
 import { FileReference } from "@/types/file";
@@ -73,6 +75,11 @@ import ChatSidebar from "@/components/chat/ChatSidebar.vue";
 import ChatHeader from "@/components/chat/ChatHeader.vue";
 import ChatMessageList from "@/components/chat/ChatMessageList.vue";
 import ChatComposer from "@/components/chat/ChatComposer.vue";
+/** Public surface of `ChatComposer` used through a template ref. */
+type ComposerInstance = ComponentPublicInstance & {
+  restore: (content: string, attachments: FileReference[]) => void;
+};
+
 export default defineComponent({
   name: "ChatView",
   components: {
@@ -94,11 +101,16 @@ export default defineComponent({
     const beginEdit = (message: ChatMessage) => {
       editingMessage.value = message;
     };
+    // The composer clears its draft and picked attachments as soon as a message is submitted. When
+    // the request never reached the backend the user must get both back instead of losing them.
+    const composer = ref<ComposerInstance | null>(null);
     const submit = async (content: string, attachments: FileReference[]) => {
       const target = editingMessage.value;
       editingMessage.value = null;
-      if (target) await chat.editAndResend(target, content, attachments);
-      else await chat.send(content, attachments);
+      const delivered = target
+        ? await chat.editAndResend(target, content, attachments)
+        : await chat.send(content, attachments);
+      if (!delivered) composer.value?.restore(content, attachments);
     };
     // Switching the search scope must immediately re-run it: leaving stale "content" hits under a
     // "title" search (or the other way round) would silently show the wrong list.
@@ -108,6 +120,7 @@ export default defineComponent({
     };
     return {
       chat,
+      composer,
       editingMessage,
       initials,
       beginEdit,

@@ -21,7 +21,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -117,14 +116,15 @@ public class AiStreamingService {
             // Runs on the streaming worker, after the SSE response is already open. The conversation
             // FOR UPDATE lock from prepare() is long released; remote RAG embedding latency no longer
             // blocks the HTTP response or other conversations.
-            List<AiGatewayRequest.AiGatewayMessage> context = persistence.buildContext(stream);
+            AiStreamContext context = persistence.buildContext(stream);
             long contextMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
-            log.info("AI stream context built requestId={} contextMs={} messageCount={}",
-                    stream.requestId(), contextMs, context.size());
+            log.info("AI stream context built requestId={} contextMs={} messageCount={} attachmentCount={}",
+                    stream.requestId(), contextMs, context.messages().size(), context.attachments().size());
 
             pythonStartNanos[0] = System.nanoTime();
             AiGatewayRequest gatewayRequest = new AiGatewayRequest(stream.requestId(),
-                    stream.providerKey(), stream.externalModelId(), context);
+                    stream.providerKey(), stream.externalModelId(), context.messages(),
+                    context.attachments());
             gateway.stream(gatewayRequest, cancellation,
                     event -> handleGatewayEvent(stream, emitter, cancellation, content, usage, finish,
                             firstDeltaNanos, pythonStartNanos, startNanos, event));

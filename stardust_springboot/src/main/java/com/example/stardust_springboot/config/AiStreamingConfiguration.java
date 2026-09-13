@@ -10,7 +10,7 @@ import java.util.concurrent.Executors;
 
 @Configuration
 @EnableConfigurationProperties({AiServiceProperties.class, ConversationContextProperties.class,
-        MemoryProperties.class, RagProperties.class, AiUsageProperties.class})
+        MemoryProperties.class, RagProperties.class, AiUsageProperties.class, AttachmentProperties.class})
 public class AiStreamingConfiguration {
 
     @Bean(destroyMethod = "close")

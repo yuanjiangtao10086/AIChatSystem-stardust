@@ -17,6 +17,7 @@ public record PreparedAiStream(
         String providerKey,
         String externalModelId,
         String operation,
-        List<AiGatewayRequest.AiGatewayMessage> messages
+        List<AiGatewayRequest.AiGatewayMessage> messages,
+        long attachmentBytes
 ) {
 }

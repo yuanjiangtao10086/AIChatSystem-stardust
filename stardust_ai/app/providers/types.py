@@ -10,9 +10,27 @@ class ProviderMessageRole(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class TextPart:
+    """One text segment of a multimodal user message."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ImagePart:
+    """One image of a multimodal user message, addressed by URL or data URI."""
+
+    url: str
+    detail: str = "auto"
+
+
+ContentPart = TextPart | ImagePart
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderMessage:
     role: ProviderMessageRole
-    content: str
+    content: str | tuple[ContentPart, ...]
 
 
 @dataclass(frozen=True, slots=True)

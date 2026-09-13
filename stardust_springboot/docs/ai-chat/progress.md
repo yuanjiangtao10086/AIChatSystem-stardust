@@ -407,7 +407,8 @@
 ### 明确未做
 
 - [ ] 未实现病毒扫描/CDR、对象存储 adapter、分片/断点续传、内容级去重、批量操作和管理员文件 UI。
-- [ ] 未实现多模态模型读取、文档解析、RAG ingestion 或 Python 内部文件下载；聊天附件当前仅为受保护的业务引用。
+- [x] 聊天附件支持 PDF 文本提取：Spring 在流式 worker 上以 Apache PDFBox 解析 `application/pdf`，提取文本作为 TEXT 附件送达 Python；扫描版/无文本层/损坏的 PDF 仍标记为 UNSUPPORTED 并给出明确原因。图片与纯文本附件行为不变。
+- [ ] 未实现多模态模型读取、RAG ingestion 或 Python 内部文件下载；聊天附件当前仅为受保护的业务引用。
 - [ ] 未实现过期 `UPLOADING/DELETING` 自动恢复与周期配额对账任务；状态和索引已为恢复任务保留。
 
 ## 阶段 6：现代 GPT 风格用户聊天 UI

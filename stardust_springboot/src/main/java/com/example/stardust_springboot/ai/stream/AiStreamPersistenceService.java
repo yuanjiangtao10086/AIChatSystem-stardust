@@ -1,6 +1,8 @@
 package com.example.stardust_springboot.ai.stream;
 
 import com.example.stardust_springboot.ai.entity.AiModel;
+import com.example.stardust_springboot.ai.attachment.ChatAttachment;
+import com.example.stardust_springboot.ai.attachment.ChatAttachmentResolver;
 import com.example.stardust_springboot.ai.gateway.AiGatewayRequest;
 import com.example.stardust_springboot.ai.repository.AiModelRepository;
 import com.example.stardust_springboot.ai.request.AiRequestLog;
@@ -39,6 +41,7 @@ public class AiStreamPersistenceService {
     private final AiRequestLogRepository requestLogRepository;
     private final MessageAttachmentService attachmentService;
     private final ConversationContextBuilder contextBuilder;
+    private final ChatAttachmentResolver attachmentResolver;
     private final AiUsageService usageService;
     private final TokenCounter tokenCounter;
     private final AiUsageProperties usageProperties;
@@ -50,6 +53,7 @@ public class AiStreamPersistenceService {
                                       AiRequestLogRepository requestLogRepository,
                                       MessageAttachmentService attachmentService,
                                       ConversationContextBuilder contextBuilder,
+                                      ChatAttachmentResolver attachmentResolver,
                                       AiUsageService usageService,
                                       TokenCounter tokenCounter,
                                       AiUsageProperties usageProperties,
@@ -60,6 +64,7 @@ public class AiStreamPersistenceService {
         this.requestLogRepository = requestLogRepository;
         this.attachmentService = attachmentService;
         this.contextBuilder = contextBuilder;
+        this.attachmentResolver = attachmentResolver;
         this.usageService = usageService;
         this.tokenCounter = tokenCounter;
         this.usageProperties = usageProperties;
@@ -95,7 +100,7 @@ public class AiStreamPersistenceService {
         userMessage.setClientRequestId(idempotencyKey);
         userMessage.complete(now, null, null);
         messageRepository.saveAndFlush(userMessage);
-        attachmentService.attach(userMessage, principal.id(), request.attachmentIds());
+        long attachmentBytes = attachmentService.attach(userMessage, principal.id(), request.attachmentIds());
 
         ChatMessage assistantMessage = new ChatMessage(
                 conversation, conversation.getUser(), MessageRole.ASSISTANT,
@@ -118,7 +123,8 @@ public class AiStreamPersistenceService {
         return reserveUsage(new PreparedAiStream(requestId, principal.id(), conversation.getId(),
                 assistantMessage.getId(), requestLog.getId(), conversation.getPublicId(),
                 userMessage.getPublicId(), assistantMessage.getPublicId(), model.getPublicId(),
-                model.getProvider().getCode(), model.getExternalModelId(), "SEND", quotaContext), model);
+                model.getProvider().getCode(), model.getExternalModelId(), "SEND", quotaContext,
+                attachmentBytes), model);
     }
 
     @Transactional
@@ -251,6 +257,10 @@ public class AiStreamPersistenceService {
         for (AiGatewayRequest.AiGatewayMessage message : stream.messages()) {
             promptTokens += tokenCounter.countMessage(message.role(), message.content());
         }
+        // Attachment content is read on the worker thread, after this transaction. Reserve a
+        // conservative estimate from the recorded file sizes so an over-quota user is still rejected
+        // before any file is opened.
+        promptTokens += (int) Math.min(Integer.MAX_VALUE - promptTokens, stream.attachmentBytes() / 3);
         usageService.reserve(stream.userId(), stream.requestId(), promptTokens, outputReserve(model),
                 model.getInputPrice(), model.getOutputPrice());
         return stream;
@@ -305,10 +315,13 @@ public class AiStreamPersistenceService {
                                       ChatMessage userMessage, ChatMessage assistantMessage,
                                       AiRequestLog requestLog, AiModel model, String operation,
                                       List<AiGatewayRequest.AiGatewayMessage> context) {
+        // Regenerate and edit-and-resend answer the user message stored on the stream, so their
+        // attachments are the ones attached to that message — they are never dropped silently.
         return new PreparedAiStream(requestLog.getRequestId(), principal.id(), conversation.getId(),
                 assistantMessage.getId(), requestLog.getId(), conversation.getPublicId(),
                 userMessage.getPublicId(), assistantMessage.getPublicId(), model.getPublicId(),
-                model.getProvider().getCode(), model.getExternalModelId(), operation, context);
+                model.getProvider().getCode(), model.getExternalModelId(), operation, context,
+                attachmentService.attachmentBytes(userMessage.getId()));
     }
 
     /**
@@ -318,13 +331,18 @@ public class AiStreamPersistenceService {
      * byte. The conversation row lock taken by {@code prepare} is long released by this point.
      */
     @Transactional(readOnly = true)
-    public List<AiGatewayRequest.AiGatewayMessage> buildContext(PreparedAiStream stream) {
+    public AiStreamContext buildContext(PreparedAiStream stream) {
         ChatMessage userMessage = messageRepository.findByPublicIdAndUserIdAndDeletedAtIsNull(
                         stream.userMessageId(), stream.userId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
         AiModel model = modelRepository.findEnabledChatModel(stream.modelId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
-        return contextBuilder.build(userMessage, model, stream.requestId());
+        List<AiGatewayRequest.AiGatewayMessage> messages =
+                contextBuilder.build(userMessage, model, stream.requestId());
+        // File bytes are read here, on the streaming worker, never on the HTTP request thread.
+        List<ChatAttachment> attachments =
+                attachmentResolver.resolve(userMessage.getId(), model, stream.requestId());
+        return new AiStreamContext(messages, attachments);
     }
 
     private ChatMessage requireMessage(PreparedAiStream stream) {

@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -42,12 +43,17 @@ public class JdkHttpAiGateway implements AiGateway {
         requireConfigured();
         HttpRequest httpRequest;
         try {
-            Map<String, Object> body = Map.of(
-                    "schemaVersion", "1",
-                    "aiRequestId", request.requestId(),
-                    "providerKey", request.providerKey(),
-                    "model", request.model(),
-                    "messages", request.messages());
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("schemaVersion", "1");
+            body.put("aiRequestId", request.requestId());
+            body.put("providerKey", request.providerKey());
+            body.put("model", request.model());
+            body.put("messages", request.messages());
+            // Omitted when empty so this gateway keeps working against an AI service built before the
+            // attachment contract existed (its schema rejects unknown fields).
+            if (request.attachments() != null && !request.attachments().isEmpty()) {
+                body.put("attachments", request.attachments());
+            }
             httpRequest = HttpRequest.newBuilder(properties.streamUri())
                     .timeout(properties.requestTimeout())
                     .header("Content-Type", "application/json")

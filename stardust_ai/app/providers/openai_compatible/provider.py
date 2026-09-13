@@ -25,6 +25,8 @@ from app.providers.types import (
     ChatStreamChunk,
     EmbeddingRequest,
     EmbeddingResult,
+    ProviderMessage,
+    TextPart,
     TokenUsage,
 )
 
@@ -166,10 +168,7 @@ class OpenAICompatibleProvider(LLMProvider):
     def _chat_payload(self, request: ChatRequest, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": request.model,
-            "messages": [
-                {"role": message.role.value, "content": message.content}
-                for message in request.messages
-            ],
+            "messages": [self._message_payload(message) for message in request.messages],
             "stream": stream,
         }
         if request.temperature is not None:
@@ -179,6 +178,23 @@ class OpenAICompatibleProvider(LLMProvider):
         if stream:
             payload["stream_options"] = {"include_usage": True}
         return payload
+
+    def _message_payload(self, message: ProviderMessage) -> dict[str, Any]:
+        """Text-only messages stay a plain string; multimodal turns become a content-part array."""
+        if isinstance(message.content, str):
+            return {"role": message.role.value, "content": message.content}
+        parts: list[dict[str, Any]] = []
+        for part in message.content:
+            if isinstance(part, TextPart):
+                parts.append({"type": "text", "text": part.text})
+            else:
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": part.url, "detail": part.detail},
+                    }
+                )
+        return {"role": message.role.value, "content": parts}
 
     def _parse_stream_chunk(self, payload: dict[str, Any]) -> ChatStreamChunk:
         choices = payload.get("choices") or []

@@ -13,9 +13,35 @@ class ChatRole(StrEnum):
     TOOL = "tool"
 
 
+class AttachmentKind(StrEnum):
+    """How Spring delivered an attachment. The provider layer must honour it, not re-guess."""
+
+    IMAGE = "IMAGE"
+    TEXT = "TEXT"
+    UNSUPPORTED = "UNSUPPORTED"
+
+
 class ChatMessage(ApiModel):
     role: ChatRole
     content: str = Field(min_length=1, max_length=100_000)
+
+
+class ChatAttachment(ApiModel):
+    """One chat attachment as resolved by Spring.
+
+    Spring owns storage access and the model catalog, so it decides the kind and ships the content
+    (text or base64 image). This service never receives a filesystem path or an object key: a remote
+    LLM provider cannot resolve either.
+    """
+
+    file_id: str = Field(min_length=1, max_length=64)
+    file_name: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(min_length=1, max_length=127)
+    size_bytes: int = Field(ge=0)
+    kind: AttachmentKind
+    text: str | None = Field(default=None, max_length=400_000)
+    image_base64: str | None = Field(default=None, max_length=20_000_000)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class ChatRequest(ApiModel):
@@ -26,6 +52,7 @@ class ChatRequest(ApiModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=200)
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_output_tokens: int | None = Field(default=None, ge=1, le=131_072)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=10)
 
     @field_validator("ai_request_id")
     @classmethod

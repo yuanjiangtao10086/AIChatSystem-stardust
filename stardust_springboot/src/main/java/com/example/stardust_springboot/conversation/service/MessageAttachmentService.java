@@ -28,8 +28,17 @@ public class MessageAttachmentService {
         this.attachmentRepository = attachmentRepository;
     }
 
-    public void attach(ChatMessage message, Long userId, List<String> requestedIds) {
-        if (requestedIds == null || requestedIds.isEmpty()) return;
+    /**
+     * Links already-uploaded files to a message and returns their total size in bytes.
+     *
+     * <p>The total size lets the caller reserve quota for attachment content without reading any file
+     * on the HTTP request thread. Files are never re-uploaded: only an owner-scoped reference to an
+     * existing {@code user_file} row is created.
+     *
+     * @return total size of the attached files, or {@code 0} when nothing was attached
+     */
+    public long attach(ChatMessage message, Long userId, List<String> requestedIds) {
+        if (requestedIds == null || requestedIds.isEmpty()) return 0;
         LinkedHashSet<String> ids = new LinkedHashSet<>(requestedIds);
         if (ids.size() != requestedIds.size() || ids.size() > MAX_ATTACHMENTS) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
@@ -39,11 +48,25 @@ public class MessageAttachmentService {
         if (files.size() != ids.size()) throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         Map<String, UserFile> byId = files.stream().collect(Collectors.toMap(UserFile::getPublicId,
                 Function.identity()));
+        long totalBytes = 0;
         int order = 0;
         for (String id : ids) {
+            UserFile file = byId.get(id);
+            totalBytes += file.getSizeBytes();
             attachmentRepository.save(new ChatMessageAttachment(
-                    message, byId.get(id), message.getUser(), order++));
+                    message, file, message.getUser(), order++));
         }
         attachmentRepository.flush();
+        return totalBytes;
+    }
+
+    /**
+     * Total size of the files already attached to a message. Used when a regenerated answer has to
+     * reserve quota for the attachments of the original user message without reading them again.
+     */
+    public long attachmentBytes(Long messageId) {
+        return attachmentRepository.findByMessage(messageId).stream()
+                .mapToLong(link -> link.getUserFile().getSizeBytes())
+                .sum();
     }
 }

@@ -10,7 +10,12 @@ from app.core.request_context import current_request_id
 from app.core.settings import Settings
 from app.providers.registry import ProviderRegistry
 from app.providers.types import ChatRequest as ProviderChatRequest
-from app.providers.types import ProviderMessage, ProviderMessageRole, TokenUsage
+from app.providers.types import (
+    ProviderMessage,
+    ProviderMessageRole,
+    TextPart,
+    TokenUsage,
+)
 from app.schemas.chat import (
     ChatMessage,
     ChatRequest,
@@ -19,6 +24,7 @@ from app.schemas.chat import (
     StreamEvent,
 )
 from app.schemas.chat import TokenUsage as TokenUsageSchema
+from app.services.attachments import AttachmentContext, build_attachment_context
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +60,13 @@ class ChatService:
         start_ns = time.perf_counter_ns()
         first_token_ns: int | None = None
         logger.info(
-            "chat stream start ai_request_id=%s provider_key=%s model=%s message_count=%d",
+            "chat stream start ai_request_id=%s provider_key=%s model=%s"
+            " message_count=%d attachment_count=%d",
             request.ai_request_id,
             request.provider_key,
             request.model,
             len(request.messages),
+            len(request.attachments),
         )
         try:
             model = self._resolve_model(request)
@@ -235,13 +243,52 @@ class ChatService:
     def _to_provider_request(self, request: ChatRequest) -> ProviderChatRequest:
         return ProviderChatRequest(
             model=self._resolve_model(request),
-            messages=tuple(
-                ProviderMessage(ProviderMessageRole(message.role.value), message.content)
-                for message in request.messages
-            ),
+            messages=self._build_messages(request),
             temperature=request.temperature,
             max_output_tokens=request.max_output_tokens,
         )
+
+    def _build_messages(self, request: ChatRequest) -> tuple[ProviderMessage, ...]:
+        """Converts schema messages to provider messages, folding attachments in.
+
+        Attachment text becomes one untrusted block immediately before the final user turn; images
+        become vision parts of that same turn, which is the only place providers accept them. The
+        current user message therefore always stays last, as the context contract requires.
+        """
+        context: AttachmentContext | None = None
+        if request.attachments:
+            context = build_attachment_context(request.attachments, self._settings)
+            logger.info(
+                "chat attachments ai_request_id=%s attachmentCount=%d"
+                " imageCount=%d hasTextBlock=%s",
+                request.ai_request_id,
+                len(request.attachments),
+                len(context.image_parts),
+                context.text_block is not None,
+            )
+        last_user_index = -1
+        for index, message in enumerate(request.messages):
+            if message.role is ChatRole.USER:
+                last_user_index = index
+
+        messages: list[ProviderMessage] = []
+        if last_user_index < 0 and context is not None and context.text_block:
+            # No user turn to anchor to: keep the attachment data, still marked untrusted.
+            messages.append(ProviderMessage(ProviderMessageRole.SYSTEM, context.text_block))
+        for index, message in enumerate(request.messages):
+            role = ProviderMessageRole(message.role.value)
+            if index != last_user_index or context is None:
+                messages.append(ProviderMessage(role, message.content))
+                continue
+            if context.text_block:
+                messages.append(ProviderMessage(ProviderMessageRole.SYSTEM, context.text_block))
+            if context.image_parts:
+                messages.append(
+                    ProviderMessage(role, (TextPart(message.content), *context.image_parts))
+                )
+            else:
+                messages.append(ProviderMessage(role, message.content))
+        return tuple(messages)
 
     def _resolve_model(self, request: ChatRequest) -> str:
         model = request.model or self._settings.openai_compatible_default_model

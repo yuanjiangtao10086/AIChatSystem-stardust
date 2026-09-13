@@ -220,6 +220,6 @@ class ConversationShortMemoryIntegrationTests {
     private PreparedAiStream prepared(ChatMessage assistant) {
         return new PreparedAiStream("request-test", user.getId(), conversation.getId(), assistant.getId(),
                 0L, conversation.getPublicId(), "user-message", assistant.getPublicId(), model.getPublicId(),
-                model.getProvider().getCode(), model.getExternalModelId(), "SEND", List.of());
+                model.getProvider().getCode(), model.getExternalModelId(), "SEND", List.of(), 0L);
     }
 }
