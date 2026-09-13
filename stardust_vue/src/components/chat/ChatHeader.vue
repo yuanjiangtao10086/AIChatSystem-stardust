@@ -25,20 +25,11 @@
     <details ref="exportMenu" class="export-menu">
       <summary :aria-disabled="!conversationId">导出</summary>
       <div>
-        <button
-          type="button"
-          :disabled="!conversationId"
-          @click="emitExport('MARKDOWN')"
-        >
-          Markdown
-        </button>
-        <button
-          type="button"
-          :disabled="!conversationId"
-          @click="emitExport('JSON')"
-        >
-          JSON
-        </button>
+        <p v-if="!conversationId" class="export-hint">
+          请先创建或打开一个对话后再导出
+        </p>
+        <button type="button" @click="emitExport('MARKDOWN')">Markdown</button>
+        <button type="button" @click="emitExport('JSON')">JSON</button>
       </div>
     </details>
   </header>
@@ -94,6 +85,8 @@ export default defineComponent({
 </script>
 <style scoped>
 .chat-header {
+  position: relative;
+  z-index: 10;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
@@ -185,6 +178,13 @@ export default defineComponent({
   border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+.export-menu .export-hint {
+  margin: 0 0 4px;
+  padding: 6px 10px;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 .export-menu button {
   padding: 8px 10px;

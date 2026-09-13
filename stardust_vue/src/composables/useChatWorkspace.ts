@@ -176,7 +176,10 @@ export function useChatWorkspace() {
     format: ConversationExportFormat
   ): Promise<void> => {
     const id = conversationId.value;
-    if (!id) return;
+    if (!id) {
+      error.value = "当前没有可导出的对话，请先创建或打开一个对话。";
+      return;
+    }
     try {
       const response = await exportConversation(id, format);
       const blob = await response.blob();
