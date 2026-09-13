@@ -194,6 +194,10 @@ public class AiStreamingService {
                                     StreamCancellation cancellation, StringBuilder content,
                                     MutableUsage usage, MutableFinish finish, long[] firstDeltaNanos,
                                     long[] pythonStartNanos, long startNanos, AiGatewayEvent event) {
+        if (log.isDebugEnabled()) {
+            log.debug("[stream] spring->vue requestId={} type={}",
+                    stream.requestId(), event.type());
+        }
         switch (event.type()) {
             case "start" -> { }
             case "delta" -> {

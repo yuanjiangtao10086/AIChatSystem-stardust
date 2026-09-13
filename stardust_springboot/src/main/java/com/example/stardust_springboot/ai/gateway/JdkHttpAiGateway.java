@@ -1,6 +1,8 @@
 package com.example.stardust_springboot.ai.gateway;
 
 import com.example.stardust_springboot.config.AiServiceProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
@@ -26,6 +28,8 @@ public class JdkHttpAiGateway implements AiGateway {
             "start", "delta", "reasoning", "usage", "done", "error",
             "citation", "tool_start", "tool_delta", "tool_done");
     private static final int MAX_EVENT_CHARS = 1_000_000;
+
+    private static final Logger log = LoggerFactory.getLogger(JdkHttpAiGateway.class);
 
     private final HttpClient client;
     private final ObjectMapper objectMapper;
@@ -150,6 +154,10 @@ public class JdkHttpAiGateway implements AiGateway {
                         String.valueOf(payload.getOrDefault("code", "PROVIDER_ERROR")),
                         "AI provider request failed",
                         Boolean.TRUE.equals(payload.get("retryable")));
+            }
+            if (log.isDebugEnabled()) {
+                log.debug("[stream] python->spring requestId={} seq={} event={} bytes={}",
+                        requestId, expectedSequence, event, data.length());
             }
             consumer.accept(new AiGatewayEvent(event, payload));
             return "done".equals(event);

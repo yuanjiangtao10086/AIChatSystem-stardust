@@ -9,6 +9,7 @@ import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.common.api.ApiResult;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -35,32 +36,46 @@ public class AiStreamController {
 
     @PostMapping(path = "/conversations/{conversationId}/messages/stream",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(
+    public ResponseEntity<SseEmitter> stream(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable String conversationId,
             @RequestHeader("Idempotency-Key") @Pattern(regexp = SAFE_ID) String idempotencyKey,
             @Valid @RequestBody StreamChatRequest request) {
-        return streamingService.start(principal, conversationId, idempotencyKey, request);
+        return streamingResponse(streamingService.start(principal, conversationId, idempotencyKey, request));
     }
 
     @PostMapping(path = "/messages/{messageId}/regenerate",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter regenerate(
+    public ResponseEntity<SseEmitter> regenerate(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable String messageId,
             @RequestHeader("Idempotency-Key") @Pattern(regexp = SAFE_ID) String idempotencyKey,
             @Valid @RequestBody RegenerateMessageRequest request) {
-        return streamingService.regenerate(principal, messageId, idempotencyKey, request);
+        return streamingResponse(streamingService.regenerate(principal, messageId, idempotencyKey, request));
     }
 
     @PostMapping(path = "/messages/{messageId}/edit-and-resend",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter editAndResend(
+    public ResponseEntity<SseEmitter> editAndResend(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable String messageId,
             @RequestHeader("Idempotency-Key") @Pattern(regexp = SAFE_ID) String idempotencyKey,
             @Valid @RequestBody EditAndResendMessageRequest request) {
-        return streamingService.editAndResend(principal, messageId, idempotencyKey, request);
+        return streamingResponse(streamingService.editAndResend(principal, messageId, idempotencyKey, request));
+    }
+
+    /**
+     * Wraps the streaming emitter so the browser-facing response carries the headers that stop any
+     * reverse proxy (nginx, corporate proxy, dev-server proxy) from buffering the event stream. Without
+     * {@code X-Accel-Buffering: no} and {@code Cache-Control: no-cache}, a proxy may hold every SSE
+     * chunk until the connection closes and then deliver the whole reply at once, which looks like the
+     * assistant answered in one shot.
+     */
+    private static ResponseEntity<SseEmitter> streamingResponse(SseEmitter emitter) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
+                .header("X-Accel-Buffering", "no")
+                .body(emitter);
     }
 
     @PostMapping("/ai/requests/{requestId}/stop")
