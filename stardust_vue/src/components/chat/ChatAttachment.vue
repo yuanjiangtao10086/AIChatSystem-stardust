@@ -1,11 +1,11 @@
 <template>
-  <div class="attachment-picker">
+  <div ref="root" class="attachment-picker">
     <button
       class="attachment"
       type="button"
       :disabled="disabled"
-      title="从云盘中选择附件"
-      aria-label="选择云盘中的文件"
+      title="从云盘选择或上传附件"
+      aria-label="选择聊天附件"
       :aria-expanded="open"
       @click="toggle"
     >
@@ -18,10 +18,37 @@
         >
         <router-link to="/files">管理云盘</router-link>
       </header>
+      <label
+        class="upload-zone"
+        :class="{ dragging }"
+        @dragenter.prevent="dragging = true"
+        @dragover.prevent
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="drop"
+      >
+        <input
+          ref="pickerInput"
+          type="file"
+          multiple
+          :accept="accept"
+          :disabled="disabled"
+          @change="choose"
+        />
+        <span class="upload-mark" aria-hidden="true">↑</span>
+        <span class="upload-text">
+          <strong>上传文件</strong>
+          <small>从本地上传并自动保存至云盘 · 单文件最大 25 MB</small>
+        </span>
+      </label>
       <p v-if="error" class="state error">{{ error }}</p>
-      <p v-else-if="loading" class="state">正在加载文件…</p>
-      <p v-else-if="!files.length" class="state">请先在云盘页面上传文件。</p>
-      <ul v-else>
+      <p v-if="limitNotice" class="state">{{ limitNotice }}</p>
+      <p v-if="uploading.length" class="state uploading">
+        <span v-for="item in uploading" :key="item.key">
+          {{ item.name }} 上传中…
+        </span>
+      </p>
+      <p v-if="loading && !files.length" class="state">正在加载文件…</p>
+      <ul v-else-if="files.length">
         <li v-for="file in files" :key="file.id">
           <button
             type="button"
@@ -37,14 +64,22 @@
           </button>
         </li>
       </ul>
+      <p v-else-if="!loading" class="state">
+        云盘还没有文件，可在上方直接上传。
+      </p>
       <footer>已选 {{ modelValue.length }}/10 个文件</footer>
     </section>
   </div>
 </template>
 <script lang="ts">
-import { defineComponent, PropType, ref } from "vue";
-import { listFiles, formatBytes } from "@/api/files";
+import { defineComponent, onUnmounted, PropType, ref, watch } from "vue";
+import { formatBytes, listFiles, uploadFile } from "@/api/files";
 import { FileReference, UserFile } from "@/types/file";
+
+const MAX_ATTACHMENTS = 10;
+/** 与云盘 FileDropzone 保持同一份类型限制；后端仍会做最终校验。 */
+const ACCEPT =
+  ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx";
 
 export default defineComponent({
   name: "ChatAttachment",
@@ -57,11 +92,17 @@ export default defineComponent({
   },
   emits: ["update:modelValue"],
   setup(props, { emit }) {
+    const root = ref<HTMLElement | null>(null);
     const open = ref(false);
     const loading = ref(false);
     const loaded = ref(false);
     const error = ref("");
+    const limitNotice = ref("");
     const files = ref<UserFile[]>([]);
+    const pickerInput = ref<HTMLInputElement | null>(null);
+    const dragging = ref(false);
+    const uploading = ref<{ key: string; name: string }[]>([]);
+
     const load = async () => {
       loading.value = true;
       error.value = "";
@@ -75,31 +116,135 @@ export default defineComponent({
         loading.value = false;
       }
     };
+    const close = () => {
+      open.value = false;
+    };
     const toggle = async () => {
       open.value = !open.value;
       if (open.value && !loaded.value) await load();
     };
+    // Popover 交互：仅当按下位置在面板（含"+"按钮）之外时关闭。
+    // 面板内部的任何点击（上传、选择文件、管理云盘）都不会触发关闭。
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        root.value &&
+        target instanceof Node &&
+        !root.value.contains(target)
+      ) {
+        close();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    // 监听器只随 open 状态挂载/卸载一次，组件销毁时兜底移除，避免泄漏。
+    watch(open, (value) => {
+      if (value) {
+        document.addEventListener("pointerdown", handlePointerDown);
+        document.addEventListener("keydown", handleKeyDown);
+      } else {
+        document.removeEventListener("pointerdown", handlePointerDown);
+        document.removeEventListener("keydown", handleKeyDown);
+      }
+    });
+    onUnmounted(() => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    });
+
     const isSelected = (id: string) =>
       props.modelValue.some((file) => file.id === id);
     const select = (file: UserFile) => {
+      limitNotice.value = "";
       if (isSelected(file.id)) {
         emit(
           "update:modelValue",
           props.modelValue.filter((item) => item.id !== file.id)
         );
-      } else if (props.modelValue.length < 10) {
+      } else if (props.modelValue.length < MAX_ATTACHMENTS) {
         emit("update:modelValue", [...props.modelValue, file]);
+      } else {
+        limitNotice.value = `最多选择 ${MAX_ATTACHMENTS} 个文件。`;
       }
     };
+    /**
+     * 上传本地文件：走云盘同一上传接口（POST /api/v1/files），文件会真正
+     * 落库到"我的云盘"；成功后立即插入面板列表并自动加入当前消息附件。
+     */
+    const uploadAll = async (list: FileList | null) => {
+      const incoming = Array.from(list || []);
+      if (pickerInput.value) pickerInput.value.value = "";
+      if (!incoming.length || props.disabled) return;
+      // 用本地数组累积本轮选择：同一批次连续 emit 时父组件的 props 可能
+      // 还没刷新，读 props 会丢掉前一次的选择；上限判断也以本地为准。
+      let selected = [...props.modelValue];
+      for (const file of incoming) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        // 防止同一文件（同名同大小同修改时间）被重复触发上传。
+        if (uploading.value.some((item) => item.key === key)) continue;
+        const existing = files.value.find(
+          (item) => item.name === file.name && item.size === file.size
+        );
+        if (existing) {
+          // 云盘已有同名同大小文件：不重复上传，直接引用已有记录。
+          if (
+            !selected.some((item) => item.id === existing.id) &&
+            selected.length < MAX_ATTACHMENTS
+          ) {
+            selected = [...selected, existing];
+            emit("update:modelValue", selected);
+          }
+          continue;
+        }
+        uploading.value.push({ key, name: file.name });
+        try {
+          const created = await uploadFile(file);
+          loaded.value = true;
+          if (!files.value.some((item) => item.id === created.id)) {
+            files.value.unshift(created);
+          }
+          if (
+            !selected.some((item) => item.id === created.id) &&
+            selected.length < MAX_ATTACHMENTS
+          ) {
+            selected = [...selected, created];
+            emit("update:modelValue", selected);
+          }
+        } catch (value) {
+          error.value = `${file.name} 上传失败，请重试。`;
+        } finally {
+          uploading.value = uploading.value.filter((item) => item.key !== key);
+        }
+      }
+      if (selected.length >= MAX_ATTACHMENTS) {
+        limitNotice.value = `最多选择 ${MAX_ATTACHMENTS} 个文件。`;
+      }
+    };
+    const choose = (event: Event) => {
+      void uploadAll((event.target as HTMLInputElement).files);
+    };
+    const drop = (event: DragEvent) => {
+      dragging.value = false;
+      void uploadAll(event.dataTransfer?.files || null);
+    };
     return {
+      accept: ACCEPT,
       bytes: formatBytes,
+      choose,
+      dragging,
+      drop,
       error,
       files,
       isSelected,
+      limitNotice,
       loading,
       open,
+      pickerInput,
+      root,
       select,
       toggle,
+      uploading,
     };
   },
 });
@@ -172,8 +317,57 @@ export default defineComponent({
   font-size: 0.68rem;
   text-decoration: none;
 }
+/* 面板内上传区：点击或拖拽，复用云盘 accept 规则与上传接口 */
+.upload-zone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px dashed #c4c4c8;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.upload-zone:hover,
+.upload-zone.dragging {
+  border-color: var(--ink);
+  background: var(--surface-soft);
+}
+.upload-zone input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.upload-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  color: var(--ink-soft);
+  background: var(--surface-soft);
+  font-size: 1rem;
+  font-weight: 700;
+}
+.upload-text {
+  min-width: 0;
+}
+.upload-text strong {
+  display: block;
+  color: #30384b;
+  font-size: 0.72rem;
+}
+.upload-text small {
+  display: block;
+  margin-top: 2px;
+  color: #9299a9;
+  font-size: 0.62rem;
+}
 .picker ul {
-  max-height: 225px;
+  max-height: 190px;
   margin: 8px 0;
   padding: 0;
   overflow: auto;
@@ -230,6 +424,9 @@ export default defineComponent({
 }
 .state.error {
   color: #9b4946;
+}
+.state.uploading span {
+  display: block;
 }
 .picker footer {
   color: #9aa1af;

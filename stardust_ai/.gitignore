@@ -1,32 +1,37 @@
+# Local environment and secrets
 .env
-.idea/
-.pytest_cache/
-.ruff_cache/
+.env.*
+!.env.example
+
+# Python environments and caches
 .venv/
+venv/
+env/
+ENV/
 __pycache__/
 *.py[cod]
-data/
-
-# test / tooling caches
+.pytest_cache/
 .pytest_tmp/
+.ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
-.venv*/
+.nox/
 
-# packaging / build
+# Packaging output
 *.egg-info/
 dist/
 build/
-*.pyc
 
-# runtime data / logs
-*.sqlite3
-*.db
-*.log
+# Local RAG vector database and runtime logs
+data/
 logs/
+*.log
 
-# OS files
+# Personal IDE and OS state
+.idea/
+.vscode/
 .DS_Store
 Thumbs.db

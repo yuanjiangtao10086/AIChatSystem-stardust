@@ -25,14 +25,54 @@
       ><input
         :value="search"
         type="search"
-        placeholder="搜索对话"
-        aria-label="搜索对话"
+        :placeholder="searchPlaceholder"
+        :aria-label="searchPlaceholder"
         @input="
           $emit('update:search', ($event.target as HTMLInputElement).value)
         "
         @keyup.enter="$emit('search')"
     /></label>
+    <div class="search-mode" role="group" aria-label="搜索范围">
+      <button
+        type="button"
+        :class="{ active: searchMode === 'title' }"
+        @click="$emit('update:searchMode', 'title')"
+      >
+        标题
+      </button>
+      <button
+        type="button"
+        :class="{ active: searchMode === 'content' }"
+        @click="$emit('update:searchMode', 'content')"
+      >
+        内容
+      </button>
+    </div>
+    <div v-if="searchMode === 'content'" class="hit-list">
+      <p v-if="searching" class="hit-hint">正在搜索…</p>
+      <p v-else-if="!search.trim()" class="hit-hint">
+        输入关键词后按回车，搜索全部对话的消息内容。
+      </p>
+      <p v-else-if="!searchHits.length" class="hit-hint">没有匹配的消息。</p>
+      <template v-else>
+        <button
+          v-for="hit in searchHits"
+          :key="hit.messageId"
+          type="button"
+          class="hit"
+          @click="$emit('open-hit', hit)"
+        >
+          <strong class="hit-title">{{ hit.conversationTitle }}</strong>
+          <span class="hit-snippet">{{ hit.snippet }}</span>
+          <span class="hit-meta"
+            >{{ hit.role === "USER" ? "你" : "星语" }} ·
+            {{ formatTime(hit.createdAt) }}</span
+          >
+        </button>
+      </template>
+    </div>
     <ConversationList
+      v-else
       :conversations="conversations"
       :active-id="activeId"
       :loading="loading"
@@ -53,7 +93,10 @@
         ><router-link to="/memories">记忆管理</router-link
         ><router-link to="/profile">个人设置</router-link
         ><router-link v-if="canAdmin" to="/admin">管理后台</router-link
-        ><button type="button" @click="logout">退出登录</button>
+        ><button type="button" @click="toggleTheme">
+          {{ isDark ? "浅色模式" : "深色模式" }}
+        </button>
+        <button type="button" @click="logout">退出登录</button>
       </div>
     </details>
   </aside>
@@ -64,8 +107,9 @@ import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import ConversationList from "./ConversationList.vue";
 import UsagePanel from "@/components/usage/UsagePanel.vue";
-import { Conversation } from "@/types/conversation";
+import { Conversation, MessageSearchHit } from "@/types/conversation";
 import { UserProfile } from "@/types/auth";
+import { useTheme } from "@/composables/useTheme";
 export default defineComponent({
   name: "ChatSidebar",
   components: { ConversationList, UsagePanel },
@@ -73,13 +117,30 @@ export default defineComponent({
     conversations: { type: Array as PropType<Conversation[]>, required: true },
     activeId: String,
     search: { type: String, required: true },
+    searchMode: {
+      type: String as PropType<"title" | "content">,
+      default: "title",
+    },
+    searchHits: {
+      type: Array as PropType<MessageSearchHit[]>,
+      default: () => [],
+    },
     loading: Boolean,
     creating: Boolean,
+    searching: Boolean,
   },
-  emits: ["new", "search", "update:search", "close"],
-  setup() {
+  emits: [
+    "new",
+    "search",
+    "update:search",
+    "update:searchMode",
+    "open-hit",
+    "close",
+  ],
+  setup(props) {
     const store = useStore();
     const router = useRouter();
+    const { isDark, toggle } = useTheme();
     const user = computed(() => store.state.auth.user as UserProfile | null);
     const canAdmin = computed(
       () => store.getters["auth/canAccessAdmin"] as boolean
@@ -87,18 +148,37 @@ export default defineComponent({
     const initials = computed(
       () => user.value?.displayName.trim().slice(0, 2).toUpperCase() || "我"
     );
+    const formatTime = (value: string): string =>
+      new Date(value).toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    const searchPlaceholder = computed(() =>
+      props.searchMode === "content" ? "搜索聊天内容" : "搜索对话标题"
+    );
     const logout = async () => {
       await store.dispatch("auth/logout");
       await router.replace({ name: "login" });
     };
-    return { user, canAdmin, initials, logout };
+    return {
+      user,
+      canAdmin,
+      initials,
+      formatTime,
+      searchPlaceholder,
+      isDark,
+      toggleTheme: toggle,
+      logout,
+    };
   },
 });
 </script>
 <style scoped>
 .chat-sidebar {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
   gap: 8px;
   height: 100%;
   padding: 14px 10px 10px;
@@ -181,6 +261,76 @@ export default defineComponent({
 }
 .search-box input::placeholder {
   color: var(--ink-faint);
+}
+.search-mode {
+  display: flex;
+  gap: 6px;
+  padding: 0 2px;
+}
+.search-mode button {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.search-mode button:hover {
+  background: var(--surface-soft);
+}
+.search-mode button.active {
+  border-color: var(--ink);
+  color: var(--paper);
+  background: var(--ink);
+}
+.hit-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.hit-hint {
+  margin: 4px 2px;
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.hit {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.hit:hover {
+  background: var(--surface-soft);
+}
+.hit-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hit-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.hit-meta {
+  color: var(--ink-faint);
+  font-size: 0.66rem;
 }
 .user-menu {
   position: relative;

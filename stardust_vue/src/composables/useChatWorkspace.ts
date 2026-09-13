@@ -9,7 +9,9 @@ import {
   listAiModels,
   listConversations,
   listMessages,
+  exportConversation,
   regenerateMessage,
+  searchMessages,
   stopAiRequest,
   streamConversationMessage,
 } from "@/api/conversations";
@@ -19,6 +21,8 @@ import {
   AiStreamEvent,
   ChatMessage,
   Conversation,
+  ConversationExportFormat,
+  MessageSearchHit,
 } from "@/types/conversation";
 import { FileReference } from "@/types/file";
 import { selectActiveBranch } from "@/utils/conversationBranch";
@@ -34,6 +38,24 @@ const newRequestId = (): string => {
     webCrypto.randomUUID?.() ??
     `req-${Date.now()}-${Math.random().toString(16).slice(2)}`
   );
+};
+
+/**
+ * Reads a download file name from `Content-Disposition`, preferring the RFC 5987 `filename*` form so
+ * Chinese conversation titles survive. Falls back to `null` when the header is absent or unparsable.
+ */
+const fileNameFromDisposition = (header: string | null): string | null => {
+  if (!header) return null;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      return encoded[1];
+    }
+  }
+  const plain = /filename="([^"]+)"/i.exec(header);
+  return plain?.[1] ?? null;
 };
 
 export function useChatWorkspace() {
@@ -67,6 +89,13 @@ export function useChatWorkspace() {
   const error = ref("");
   const activeRequestId = ref<string | null>(null);
   const sidebarOpen = ref(false);
+  // "title" filters the sidebar conversation list; "content" runs the owner-scoped
+  // message search and swaps the list for hit results.
+  const searchMode = ref<"title" | "content">("title");
+  const searchHits = ref<MessageSearchHit[]>([]);
+  const searching = ref(false);
+  const highlightMessageId = ref<string | null>(null);
+  const highlightConversationId = ref<string | null>(null);
   let controller: AbortController | null = null;
   let action: ChatAction | null = null;
   const conversationId = computed(
@@ -97,6 +126,77 @@ export function useChatWorkspace() {
     }
   };
 
+  /**
+   * Runs whatever the current search mode means: title mode re-queries the conversation list, content
+   * mode asks the backend for message hits. An empty keyword in content mode clears results instead of
+   * asking the server for "everything" (the backend rejects that too).
+   */
+  const runSearch = async (): Promise<void> => {
+    if (searchMode.value === "title") {
+      searchHits.value = [];
+      await loadConversations();
+      return;
+    }
+    const keyword = search.value.trim();
+    if (!keyword) {
+      searchHits.value = [];
+      await loadConversations();
+      return;
+    }
+    searching.value = true;
+    try {
+      searchHits.value = (await searchMessages(keyword)).items;
+    } catch (value) {
+      error.value = describeError(value);
+    } finally {
+      searching.value = false;
+    }
+  };
+
+  /**
+   * Jumps to the conversation a search hit belongs to and marks the message so the list can highlight it.
+   * Messages are re-read from the server — the UI never invents a message from a snippet.
+   */
+  const openSearchHit = async (hit: MessageSearchHit): Promise<void> => {
+    highlightMessageId.value = hit.messageId;
+    highlightConversationId.value = hit.conversationId;
+    sidebarOpen.value = false;
+    if (conversationId.value === hit.conversationId) {
+      await openConversation(hit.conversationId);
+      return;
+    }
+    await router.push({
+      name: "conversation",
+      params: { conversationId: hit.conversationId },
+    });
+  };
+
+  /** Downloads the current conversation as Markdown or JSON through the authenticated fetch layer. */
+  const exportCurrent = async (
+    format: ConversationExportFormat
+  ): Promise<void> => {
+    const id = conversationId.value;
+    if (!id) return;
+    try {
+      const response = await exportConversation(id, format);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download =
+        fileNameFromDisposition(response.headers.get("Content-Disposition")) ||
+        `conversation.${format.toLowerCase()}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      // Defer revoking the blob URL: some browsers cancel the download if the
+      // URL is released synchronously right after the click.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (value) {
+      error.value = describeError(value);
+    }
+  };
+
   const openConversation = async (id?: string): Promise<void> => {
     // Never wipe an in-flight stream for the same conversation: the running
     // request owns `allMessages` until its `finally` refresh reconciles state.
@@ -111,6 +211,8 @@ export function useChatWorkspace() {
     error.value = "";
     sidebarOpen.value = false;
     if (!id) return;
+    // A highlight belongs to the hit the user clicked: opening any other conversation clears it.
+    if (highlightConversationId.value !== id) highlightMessageId.value = null;
     loadingMessages.value = true;
     try {
       const [detail, history] = await Promise.all([
@@ -390,7 +492,14 @@ export function useChatWorkspace() {
     sending,
     error,
     sidebarOpen,
+    searchMode,
+    searchHits,
+    searching,
+    highlightMessageId,
     loadConversations,
+    runSearch,
+    openSearchHit,
+    exportCurrent,
     newConversation,
     cleanupEmptyConversations,
     send,

@@ -1,27 +1,25 @@
-.DS_Store
-node_modules
-/dist
-
-
-# local env files
-.env.local
-.env.*.local
-
-# dependencies
+# Dependencies and package-manager caches
 node_modules/
-.pnpm-store/
 .npmcache/
-.yarn/cache
+.pnpm-store/
+.yarn/cache/
 
-# builds
-/dist
+# Build, test, and tool output
 dist/
-/dist-ssr
+dist-ssr/
+.vite/
+.cache/
+coverage/
 *.tsbuildinfo
 .eslintcache
 .stylelintcache
 
-# Log files
+# Local environment files (the template remains trackable)
+.env
+.env.*
+!.env.example
+
+# Logs and temporary output
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -29,26 +27,14 @@ pnpm-debug.log*
 *.log
 *.err
 
-# local env files
-.env
-.env.*
-!.env.example
-
-# logs
-*.log
-
-# coverage
-coverage/
-
-# Editor directories and files
-.idea
-.vscode
+# Personal editor and OS state
+.idea/
+.vscode/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-
-# OS files
+.DS_Store
 Thumbs.db
 desktop.ini

@@ -13,6 +13,33 @@
   --accent: #10a37f;
   --danger: #ef4146;
   --shadow: 0 8px 30px rgba(13, 13, 13, 0.08);
+  --topbar-bg: rgba(255, 255, 255, 0.92);
+}
+
+/* ---------- 深色模式 ----------
+   只覆盖 CSS 变量：所有组件都通过变量取色，因此切换 data-theme 即可整体换肤，
+   不需要在组件里写第二套样式。 */
+
+[data-theme="dark"] {
+  --ink: #ececf1;
+  --ink-soft: #a3a3b2;
+  --ink-faint: #8b8b9a;
+  --paper: #16171a;
+  --canvas: #1c1d21;
+  --surface: #212228;
+  --surface-soft: #2a2b32;
+  --sidebar: #17181c;
+  --line: #32333c;
+  --signal: #f4f4f6;
+  --signal-deep: #d2d2da;
+  --accent: #19c37d;
+  --danger: #ff6b6b;
+  --topbar-bg: rgba(22, 23, 26, 0.9);
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] :focus-visible {
+  outline-color: rgba(236, 236, 241, 0.55);
 }
 
 * {
@@ -66,7 +93,7 @@ a {
   min-height: 60px;
   padding: 0 5vw;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--topbar-bg);
   backdrop-filter: blur(18px);
 }
 

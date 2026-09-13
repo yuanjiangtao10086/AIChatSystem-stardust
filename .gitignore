@@ -1,78 +1,127 @@
-HELP.md
-target/
-data/
-.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-
-### Environment / Secrets ###
-.env
-.env.local
-.env.*.local
-!.env.example
-
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### IntelliJ IDEA ###
-.workbuddy/
-
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### VS Code ###
-.vscode/
-
-### Build output / IDE output ###
-out/
-bin/
-build/
-
-### Java build artifacts ###
-*.class
-*.jar
-*.war
-*.dumpstream
-HELP.md
-
-### Node ###
-.npmcache/
-.eslintcache
-*.tsbuildinfo
-
-### Logs ###
-*.log
-logs/
-
-### OS files ###
+# =========================
+# Operating system
+# =========================
 .DS_Store
 Thumbs.db
 desktop.ini
 
-### Local tool / session data ###
+# =========================
+# IDE / editor / local tools
+# =========================
+.idea/
+.vscode/
+.workbuddy/
 .codebuddy/
+*.iws
+*.iml
+*.ipr
+*.swp
+*.swo
+*~
+
+# Eclipse / STS
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# NetBeans and IDE build output
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+/out/
+/bin/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.venv/
+/stardust_ai/venv/
+/stardust_ai/env/
+/stardust_ai/ENV/
+*.egg-info/
+dist/
+build/
+
+# =========================
+# Java / Spring Boot / Maven
+# =========================
+target/
+*.class
+*.dumpstream
+.attach_pid*
+hs_err_pid*
+replay_pid*
+
+# Maven Wrapper scripts and .mvn/wrapper metadata are intentionally tracked.
+
+# =========================
+# Vue / Node.js
+# =========================
+node_modules/
+.npmcache/
+.pnpm-store/
+.yarn/cache/
+.vite/
+.cache/
+coverage/
+dist-ssr/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# package-lock.json is intentionally tracked; no other package-manager lock exists.
+
+# =========================
+# Logs / temporary files
+# =========================
+*.log
+logs/
 *.err
-*.local
 *.tmp
 *.bak
-*.swp
+tmp/
+temp/
+
+# =========================
+# Environment / secrets / personal config
+# =========================
+.env
+.env.*
+!.env.example
+application-local.*
+application-private.*
+config.local.*
+config.private.*
+config.personal.*
+settings.local.json
+local.properties
+
+# =========================
+# Runtime data / uploads
+# =========================
+# These are the actual local SQLite/vector-store and uploaded-file locations.
+/stardust_ai/data/
+/stardust_springboot/data/

@@ -88,7 +88,7 @@ export const adjustAdminUsage = (
   body: { tokenDelta: number; costDelta: string; reason: string }
 ) =>
   apiRequest<T.AdminUser>(
-    `/api/v1/admin/users/${encodeURIComponent(id)}/usage:adjust`,
+    `/api/v1/admin/users/${encodeURIComponent(id)}/usage/adjust`,
     { method: "POST", body: JSON.stringify(body) }
   );
 export const deleteAdminUser = (id: string) =>

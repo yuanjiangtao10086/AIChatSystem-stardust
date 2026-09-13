@@ -1,5 +1,12 @@
 <template>
-  <article class="chat-message" :class="`role-${message.role.toLowerCase()}`">
+  <article
+    class="chat-message"
+    :class="[
+      `role-${message.role.toLowerCase()}`,
+      { 'is-highlighted': highlighted },
+    ]"
+    :data-message-id="message.id"
+  >
     <div
       class="message-avatar"
       :class="`avatar-${message.role.toLowerCase()}`"
@@ -103,6 +110,7 @@ export default defineComponent({
     initials: { type: String, default: "我" },
     busy: Boolean,
     avatarUrl: { type: String, default: "" },
+    highlighted: Boolean,
   },
   emits: ["edit", "regenerate"],
   setup(props) {
@@ -133,6 +141,10 @@ export default defineComponent({
 }
 .chat-message + .chat-message {
   border-top: 1px solid var(--line);
+}
+.chat-message.is-highlighted {
+  background: var(--surface-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 /* 用户消息：右侧，头像在右 */
 .role-user {

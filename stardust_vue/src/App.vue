@@ -16,9 +16,12 @@
         <router-link to="/profile">个人资料</router-link>
         <router-link v-if="canAccessAdmin" to="/admin">管理后台</router-link>
       </nav>
-      <button class="quiet-button" type="button" @click="logout">
-        退出登录
-      </button>
+      <div class="topbar-actions">
+        <ThemeToggle />
+        <button class="quiet-button" type="button" @click="logout">
+          退出登录
+        </button>
+      </div>
     </header>
     <main
       :class="{ 'app-main': isAuthenticated && !isChatRoute && !isAdminRoute }"
@@ -32,9 +35,11 @@
 import { computed, defineComponent } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useStore } from "vuex";
+import ThemeToggle from "@/components/ThemeToggle.vue";
 
 export default defineComponent({
   name: "App",
+  components: { ThemeToggle },
   setup() {
     const store = useStore();
     const router = useRouter();
@@ -61,3 +66,12 @@ export default defineComponent({
   },
 });
 </script>
+
+<style scoped>
+.topbar-actions {
+  display: flex;
+  justify-self: end;
+  align-items: center;
+  gap: 10px;
+}
+</style>

@@ -1,57 +1,41 @@
-HELP.md
+# Maven / JVM output
 target/
-data/
-.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
+HELP.md
+*.class
+*.dumpstream
+.attach_pid*
+hs_err_pid*
+replay_pid*
 
-### Environment / Secrets ###
+# Maven Wrapper scripts and .mvn/wrapper metadata are intentionally tracked.
+
+# Local environment, secrets, and machine-only Spring configuration
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+application-local.*
+application-private.*
 
-### STS ###
-.apt_generated
+# Uploaded files and other runtime data
+data/
+logs/
+*.log
+
+# IDE / editor state
+.idea/
+.vscode/
+.apt_generated/
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
-.sts4-cache
-
-### IntelliJ IDEA ###
-.idea
+.sts4-cache/
 *.iws
 *.iml
 *.ipr
 
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### VS Code ###
-.vscode/
-
-### Build output / IDE output ###
-out/
-bin/
-
-### Java build artifacts ###
-*.class
-*.jar
-*.war
-*.dumpstream
-HELP.md
-
-### Logs ###
-*.log
-logs/
-*.dumpstream
-.attach_pid*
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -5,19 +5,26 @@ import com.example.stardust_springboot.common.api.ApiResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.conversation.dto.ConversationView;
 import com.example.stardust_springboot.conversation.dto.CreateConversationRequest;
+import com.example.stardust_springboot.conversation.dto.MessageSearchHitView;
 import com.example.stardust_springboot.conversation.dto.MessageView;
 import com.example.stardust_springboot.conversation.dto.UpdateConversationRequest;
+import com.example.stardust_springboot.conversation.dto.ConversationExportFormat;
 import com.example.stardust_springboot.conversation.entity.ConversationStatus;
+import com.example.stardust_springboot.conversation.service.ConversationExportService;
 import com.example.stardust_springboot.conversation.service.ConversationService;
 import com.example.stardust_springboot.conversation.service.ConversationSort;
 import com.example.stardust_springboot.conversation.service.ConversationTitleService;
+import com.example.stardust_springboot.conversation.service.MessageSearchService;
 import com.example.stardust_springboot.conversation.service.MessageService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
@@ -31,6 +38,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+
 @Validated
 @RestController
 @RequestMapping("/api/v1/conversations")
@@ -39,12 +48,18 @@ public class ConversationController {
     private final ConversationService conversationService;
     private final MessageService messageService;
     private final ConversationTitleService conversationTitleService;
+    private final MessageSearchService messageSearchService;
+    private final ConversationExportService conversationExportService;
 
     public ConversationController(ConversationService conversationService, MessageService messageService,
-                                  ConversationTitleService conversationTitleService) {
+                                  ConversationTitleService conversationTitleService,
+                                  MessageSearchService messageSearchService,
+                                  ConversationExportService conversationExportService) {
         this.conversationService = conversationService;
         this.messageService = messageService;
         this.conversationTitleService = conversationTitleService;
+        this.messageSearchService = messageSearchService;
+        this.conversationExportService = conversationExportService;
     }
 
     @PostMapping
@@ -111,6 +126,35 @@ public class ConversationController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "100") @Min(1) @Max(100) int size) {
         return ApiResult.success(messageService.list(principal, conversationId, page, size));
+    }
+
+    @GetMapping("/{conversationId}/messages/search")
+    public ApiResult<PageResult<MessageSearchHitView>> searchMessages(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable String conversationId,
+            @RequestParam("q") @Size(max = 200) String keyword,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        return ApiResult.success(
+                messageSearchService.searchInConversation(principal, conversationId, keyword, page, size));
+    }
+
+    @GetMapping("/{conversationId}/export")
+    public ResponseEntity<byte[]> export(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable String conversationId,
+            @RequestParam(defaultValue = "MARKDOWN") ConversationExportFormat format) {
+        ConversationExportService.ConversationExport export =
+                conversationExportService.export(principal, conversationId, format);
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(export.fileName(), StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .contentType(MediaType.parseMediaType(export.contentType()))
+                .body(export.body().getBytes(StandardCharsets.UTF_8));
     }
 
 }

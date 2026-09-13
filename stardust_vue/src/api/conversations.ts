@@ -9,6 +9,8 @@ import {
   AiStreamEvent,
   ChatMessage,
   Conversation,
+  ConversationExportFormat,
+  MessageSearchHit,
   PageResult,
 } from "@/types/conversation";
 import { FileReference } from "@/types/file";
@@ -75,6 +77,62 @@ export function listMessages(id: string): Promise<PageResult<ChatMessage>> {
 
 export function listAiModels(): Promise<AiModel[]> {
   return apiRequest("/api/v1/ai/models");
+}
+
+/**
+ * Owner-scoped full-text search over every conversation of the current user.
+ * The backend never returns other users' messages, and never returns full bodies — only snippets.
+ */
+export function searchMessages(
+  keyword: string,
+  page = 0,
+  size = 20
+): Promise<PageResult<MessageSearchHit>> {
+  const params = new URLSearchParams({
+    q: keyword,
+    page: String(page),
+    size: String(size),
+  });
+  return apiRequest(`/api/v1/messages/search?${params.toString()}`);
+}
+
+/** Same search, scoped to a single owned conversation. */
+export function searchConversationMessages(
+  id: string,
+  keyword: string,
+  page = 0,
+  size = 20
+): Promise<PageResult<MessageSearchHit>> {
+  const params = new URLSearchParams({
+    q: keyword,
+    page: String(page),
+    size: String(size),
+  });
+  return apiRequest(
+    `/api/v1/conversations/${encodeURIComponent(
+      id
+    )}/messages/search?${params.toString()}`
+  );
+}
+
+/**
+ * Downloads an owned conversation as Markdown or JSON. The response is a file attachment, so the raw
+ * `Response` is returned instead of an `ApiResult`; failures still need to be surfaced by the caller.
+ */
+export async function exportConversation(
+  id: string,
+  format: ConversationExportFormat
+): Promise<Response> {
+  const response = await authenticatedFetch(
+    `/api/v1/conversations/${encodeURIComponent(id)}/export?format=${format}`
+  );
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      (await response.json()) as ApiResult<unknown>
+    );
+  }
+  return response;
 }
 
 export async function streamMessage(
@@ -148,7 +206,7 @@ export function streamConversationMessage(
   return streamMessage(
     `/api/v1/conversations/${encodeURIComponent(
       conversationId
-    )}/messages:stream`,
+    )}/messages/stream`,
     {
       content,
       contentType: "PLAIN_TEXT",
@@ -168,7 +226,7 @@ export function regenerateMessage(
   onEvent: (event: AiStreamEvent) => void
 ): Promise<void> {
   return streamMessage(
-    `/api/v1/messages/${encodeURIComponent(messageId)}:regenerate`,
+    `/api/v1/messages/${encodeURIComponent(messageId)}/regenerate`,
     { modelId },
     signal,
     onEvent
@@ -184,7 +242,7 @@ export function editAndResendMessage(
   onEvent: (event: AiStreamEvent) => void
 ): Promise<void> {
   return streamMessage(
-    `/api/v1/messages/${encodeURIComponent(messageId)}:edit-and-resend`,
+    `/api/v1/messages/${encodeURIComponent(messageId)}/edit-and-resend`,
     {
       content,
       contentType: "PLAIN_TEXT",
@@ -198,7 +256,7 @@ export function editAndResendMessage(
 
 export function stopAiRequest(requestId: string): Promise<{ status: string }> {
   return apiRequest(
-    `/api/v1/ai/requests/${encodeURIComponent(requestId)}:stop`,
+    `/api/v1/ai/requests/${encodeURIComponent(requestId)}/stop`,
     {
       method: "POST",
     }

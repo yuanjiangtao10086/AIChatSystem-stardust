@@ -39,7 +39,7 @@
   </AdminModal>
 </template>
 <script lang="ts">
-import { computed, defineComponent, PropType, ref, watch } from "vue";
+import { defineComponent, PropType, ref, watch } from "vue";
 import AdminModal from "@/components/admin/AdminModal.vue";
 import { AdminUser } from "@/types/admin";
 import { UserRole } from "@/types/auth";

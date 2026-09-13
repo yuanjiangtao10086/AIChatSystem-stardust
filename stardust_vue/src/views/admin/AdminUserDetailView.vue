@@ -205,7 +205,7 @@
   </div>
 </template>
 <script lang="ts">
-import { computed, defineComponent, onMounted, PropType, ref } from "vue";
+import { computed, defineComponent, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import AdminUserFormModal from "@/components/admin/AdminUserFormModal.vue";

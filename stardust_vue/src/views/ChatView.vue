@@ -8,11 +8,16 @@
         :conversations="chat.conversations.value"
         :active-id="chat.conversationId.value"
         :search="chat.search.value"
+        :search-mode="chat.searchMode.value"
+        :search-hits="chat.searchHits.value"
+        :searching="chat.searching.value"
         :loading="chat.loadingConversations.value"
         :creating="chat.creating.value"
         @new="chat.newConversation"
-        @search="chat.loadConversations"
+        @search="chat.runSearch"
         @update:search="chat.search.value = $event"
+        @update:search-mode="onSearchModeChange"
+        @open-hit="chat.openSearchHit"
         @close="chat.sidebarOpen.value = false"
     /></template>
     <ChatHeader
@@ -24,12 +29,14 @@
       :conversation-id="chat.conversationId.value"
       @menu="chat.sidebarOpen.value = true"
       @update:model-value="chat.selectedModelId.value = $event"
+      @export="chat.exportCurrent"
     />
     <ChatMessageList
       :messages="chat.messages.value"
       :loading="chat.loadingMessages.value"
       :busy="chat.sending.value"
       :initials="initials"
+      :highlight-id="chat.highlightMessageId.value"
       @edit="beginEdit"
       @regenerate="chat.regenerate"
     />
@@ -93,7 +100,20 @@ export default defineComponent({
       if (target) await chat.editAndResend(target, content, attachments);
       else await chat.send(content, attachments);
     };
-    return { chat, editingMessage, initials, beginEdit, submit };
+    // Switching the search scope must immediately re-run it: leaving stale "content" hits under a
+    // "title" search (or the other way round) would silently show the wrong list.
+    const onSearchModeChange = (mode: "title" | "content") => {
+      chat.searchMode.value = mode;
+      void chat.runSearch();
+    };
+    return {
+      chat,
+      editingMessage,
+      initials,
+      beginEdit,
+      submit,
+      onSearchModeChange,
+    };
   },
 });
 </script>

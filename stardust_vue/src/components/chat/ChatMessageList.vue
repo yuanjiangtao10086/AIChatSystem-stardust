@@ -18,6 +18,7 @@
         :message="message"
         :initials="initials"
         :busy="busy"
+        :highlighted="message.id === highlightId"
         @edit="$emit('edit', $event)"
         @regenerate="$emit('regenerate', $event)"
       />
@@ -45,6 +46,8 @@ export default defineComponent({
     loading: Boolean,
     busy: Boolean,
     initials: String,
+    // Message the user jumped to from the search results; highlighted and scrolled into view once.
+    highlightId: { type: String, default: null },
   },
   emits: ["edit", "regenerate"],
   setup(props) {
@@ -81,6 +84,21 @@ export default defineComponent({
       () => {
         pinned.value = true;
         scrollToBottom();
+      }
+    );
+    // A search hit is only useful if the user can actually see it: jump to it instead of staying pinned
+    // to the bottom of a long conversation.
+    watch(
+      () => props.highlightId,
+      (id) => {
+        if (!id) return;
+        nextTick(() => {
+          const target = scroller.value?.querySelector<HTMLElement>(
+            `[data-message-id="${CSS.escape(id)}"]`
+          );
+          if (!target) return;
+          target.scrollIntoView({ block: "center", behavior: "smooth" });
+        });
       }
     );
     return { scroller, pinned, onScroll, scrollToBottom };

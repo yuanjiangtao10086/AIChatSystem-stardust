@@ -55,6 +55,56 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
             """)
     int failInterruptedStreams(@Param("now") Instant now);
 
+    /**
+     * Full-text (substring) search across every conversation owned by the user. Callers must pass an
+     * already lower-cased and wildcard-escaped {@code pattern}; the escape character is {@code !} because
+     * a backslash would itself be an escape character inside MySQL string literals.
+     *
+     * <p>Soft-deleted messages and messages of soft-deleted conversations are never returned, so the
+     * search can never resurrect content the user has already removed.
+     */
+    @Query(value = """
+            select message from ChatMessage message
+            join message.conversation conversation
+            where message.user.id = :userId
+              and message.deletedAt is null
+              and conversation.deletedAt is null
+              and lower(message.contentText) like :pattern escape '!'
+            """,
+            countQuery = """
+            select count(message) from ChatMessage message
+            where message.user.id = :userId
+              and message.deletedAt is null
+              and message.conversation.deletedAt is null
+              and lower(message.contentText) like :pattern escape '!'
+            """)
+    Page<ChatMessage> searchOwned(@Param("userId") Long userId, @Param("pattern") String pattern,
+                                  Pageable pageable);
+
+    /**
+     * Same substring search scoped to a single owned conversation. The caller is responsible for proving
+     * ownership of the conversation first; this query repeats the {@code user.id} predicate anyway so a
+     * wrong identifier can never widen the result set.
+     */
+    @Query(value = """
+            select message from ChatMessage message
+            where message.conversation.id = :conversationId
+              and message.user.id = :userId
+              and message.deletedAt is null
+              and lower(message.contentText) like :pattern escape '!'
+            """,
+            countQuery = """
+            select count(message) from ChatMessage message
+            where message.conversation.id = :conversationId
+              and message.user.id = :userId
+              and message.deletedAt is null
+              and lower(message.contentText) like :pattern escape '!'
+            """)
+    Page<ChatMessage> searchOwnedInConversation(@Param("conversationId") Long conversationId,
+                                                @Param("userId") Long userId,
+                                                @Param("pattern") String pattern,
+                                                Pageable pageable);
+
     Page<ChatMessage> findByConversationIdAndDeletedAtIsNull(Long conversationId, Pageable pageable);
 
     Optional<ChatMessage> findByPublicIdAndDeletedAtIsNull(String publicId);

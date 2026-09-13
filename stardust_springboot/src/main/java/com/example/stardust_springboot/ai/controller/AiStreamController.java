@@ -33,7 +33,7 @@ public class AiStreamController {
         this.streamingService = streamingService;
     }
 
-    @PostMapping(path = "/conversations/{conversationId}/messages:stream",
+    @PostMapping(path = "/conversations/{conversationId}/messages/stream",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(
             @AuthenticationPrincipal AuthenticatedUser principal,
@@ -43,7 +43,7 @@ public class AiStreamController {
         return streamingService.start(principal, conversationId, idempotencyKey, request);
     }
 
-    @PostMapping(path = "/messages/{messageId}:regenerate",
+    @PostMapping(path = "/messages/{messageId}/regenerate",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter regenerate(
             @AuthenticationPrincipal AuthenticatedUser principal,
@@ -53,7 +53,7 @@ public class AiStreamController {
         return streamingService.regenerate(principal, messageId, idempotencyKey, request);
     }
 
-    @PostMapping(path = "/messages/{messageId}:edit-and-resend",
+    @PostMapping(path = "/messages/{messageId}/edit-and-resend",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter editAndResend(
             @AuthenticationPrincipal AuthenticatedUser principal,
@@ -63,7 +63,7 @@ public class AiStreamController {
         return streamingService.editAndResend(principal, messageId, idempotencyKey, request);
     }
 
-    @PostMapping("/ai/requests/{requestId}:stop")
+    @PostMapping("/ai/requests/{requestId}/stop")
     public ResponseEntity<ApiResult<StopStreamResponse>> stop(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable @Pattern(regexp = SAFE_ID) String requestId) {

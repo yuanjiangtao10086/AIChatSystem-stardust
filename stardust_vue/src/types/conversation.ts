@@ -59,6 +59,21 @@ export interface AiModel {
   defaultModel?: boolean;
 }
 
+/** One hit of the owner-scoped message search. Only a bounded snippet travels to the browser. */
+export interface MessageSearchHit {
+  messageId: string;
+  conversationId: string;
+  conversationTitle: string;
+  role: MessageRole;
+  status: MessageStatus;
+  sequenceNo: number;
+  variantNo: number;
+  snippet: string;
+  createdAt: string;
+}
+
+export type ConversationExportFormat = "MARKDOWN" | "JSON";
+
 export type AiStreamEventType =
   | "start"
   | "delta"
