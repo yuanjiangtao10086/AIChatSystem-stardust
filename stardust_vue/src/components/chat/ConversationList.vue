@@ -11,7 +11,9 @@
         :key="item.id"
         :conversation="item"
         :active="item.id === activeId"
+        :selected="selectedIds.includes(item.id)"
         @select="$emit('select')"
+        @toggle="$emit('toggle', item.id)"
       />
     </nav>
   </div>
@@ -32,8 +34,12 @@ export default defineComponent({
     },
     activeId: String,
     loading: Boolean,
+    selectedIds: {
+      type: Array as PropType<string[]>,
+      default: () => [],
+    },
   },
-  emits: ["select"],
+  emits: ["select", "toggle"],
 });
 </script>
 

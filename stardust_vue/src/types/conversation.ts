@@ -49,6 +49,7 @@ export interface ChatMessage {
   createdAt: string;
   reasoningContent?: string;
   attachments?: FileReference[];
+  artifacts?: ChatArtifact[];
 }
 
 export interface AiModel {
@@ -84,7 +85,11 @@ export type AiStreamEventType =
   | "citation"
   | "tool_start"
   | "tool_delta"
-  | "tool_done";
+  | "tool_done"
+  | "artifact_start"
+  | "artifact_delta"
+  | "artifact_done"
+  | "artifact_error";
 
 export interface AiStreamEvent {
   type: AiStreamEventType;
@@ -104,4 +109,27 @@ export interface AiStreamEvent {
   message?: string;
   retryable?: boolean;
   partial?: boolean;
+  // AI-generated artifact (downloadable file) fields.
+  artifactId?: string;
+  filename?: string;
+  mimeType?: string;
+  artifactType?: string;
+  size?: number;
+  sha256?: string;
+  fileId?: string;
+  downloadUrl?: string;
+}
+
+/** A downloadable file produced by the assistant during a stream. */
+export interface ChatArtifact {
+  artifactId: string | null;
+  filename: string;
+  mimeType: string;
+  artifactType: string | null;
+  size: number;
+  sha256?: string | null;
+  fileId: string | null;
+  downloadUrl: string | null;
+  status: "generating" | "ready" | "error";
+  error?: { code?: string; message?: string } | null;
 }

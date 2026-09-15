@@ -25,6 +25,20 @@
           {{ FILE_STATUS_LABELS[s] }}
         </option>
       </select>
+      <div v-if="selectedIds.length" class="batch-inline">
+        <span>已选 {{ selectedIds.length }} 个文件</span>
+        <button type="button" :disabled="busy" @click="clearSelection">
+          取消选择
+        </button>
+        <button
+          type="button"
+          class="row-danger"
+          :disabled="busy"
+          @click="batchRemove"
+        >
+          {{ busy ? "删除中…" : "批量删除" }}
+        </button>
+      </div>
     </div>
 
     <div class="admin-toolbar admin-toolbar--sub">
@@ -52,6 +66,7 @@
     </div>
 
     <p v-if="error" class="admin-error">{{ error }}</p>
+    <p v-if="flash" class="admin-flash">{{ flash }}</p>
     <div v-if="loading" class="admin-loading">加载中…</div>
     <div
       v-else-if="!pageData || pageData.items.length === 0"
@@ -65,6 +80,16 @@
         <table class="admin-table">
           <thead>
             <tr>
+              <th class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="pageData.items.length > 0 && allSelected"
+                  :indeterminate.prop="someSelected && !allSelected"
+                  aria-label="全选当前页"
+                  @change="toggleAll(!allSelected)"
+                />
+              </th>
               <th>文件</th>
               <th>所属用户</th>
               <th>类型</th>
@@ -77,6 +102,16 @@
           </thead>
           <tbody>
             <tr v-for="file in pageData.items" :key="file.id">
+              <td class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="selectedIds.includes(file.id)"
+                  :disabled="file.referenced || file.status !== 'AVAILABLE'"
+                  aria-label="选择文件"
+                  @change="toggle(file.id)"
+                />
+              </td>
               <td>
                 <button
                   class="admin-user-link"
@@ -167,12 +202,13 @@
   </div>
 </template>
 <script lang="ts">
-import { defineComponent, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineComponent, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AdminPager from "@/components/admin/AdminPager.vue";
 import AdminConfirmModal from "@/components/admin/AdminConfirmModal.vue";
 import {
   deleteAdminFile,
+  deleteAdminFilesBatch,
   downloadAdminFile,
   listAdminFiles,
 } from "@/api/admin";
@@ -221,6 +257,36 @@ export default defineComponent({
     const loading = ref(false);
     const error = ref("");
     const busyId = ref("");
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const flash = ref("");
+    const allSelected = computed(
+      () =>
+        !!pageData.value &&
+        pageData.value.items.length > 0 &&
+        pageData.value.items.every(
+          (file) =>
+            selectedIds.value.includes(file.id) &&
+            !file.referenced &&
+            file.status === "AVAILABLE"
+        )
+    );
+    const someSelected = computed(() => selectedIds.value.length > 0);
+    const toggle = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const toggleAll = (on: boolean) => {
+      if (!pageData.value) return;
+      const selectable = pageData.value.items
+        .filter((file) => !file.referenced && file.status === "AVAILABLE")
+        .map((file) => file.id);
+      selectedIds.value = on ? selectable : [];
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
 
     const toInstantStart = (d: string) => (d ? `${d}T00:00:00Z` : "");
     const toInstantEnd = (d: string) => {
@@ -344,6 +410,36 @@ export default defineComponent({
     onMounted(load);
     onUnmounted(() => window.clearTimeout(searchTimer));
 
+    const batchRemove = async () => {
+      const ids = selectedIds.value.filter((id) => {
+        const file = pageData.value?.items.find((item) => item.id === id);
+        return file && !file.referenced && file.status === "AVAILABLE";
+      });
+      if (!ids.length) return;
+      if (
+        !window.confirm(
+          `确认批量删除选中的 ${ids.length} 个文件吗？该操作写入审计日志且不可恢复。`
+        )
+      )
+        return;
+      busy.value = true;
+      flash.value = "";
+      try {
+        const result = await deleteAdminFilesBatch(ids);
+        selectedIds.value = [];
+        await load();
+        flash.value =
+          `已删除 ${result.deleted} 个文件` +
+          (result.failures.length
+            ? `，${result.failures.length} 个删除失败（仍被引用或非可用状态）。`
+            : "。");
+      } catch (e) {
+        flash.value = e instanceof Error ? e.message : "批量删除失败";
+      } finally {
+        busy.value = false;
+      }
+    };
+
     return {
       search,
       userSearch,
@@ -374,7 +470,35 @@ export default defineComponent({
       FILE_STATUS_LABELS,
       formatBytes,
       formatDateTime,
+      selectedIds,
+      busy,
+      flash,
+      allSelected,
+      someSelected,
+      toggle,
+      toggleAll,
+      clearSelection,
+      batchRemove,
     };
   },
 });
 </script>
+<style scoped>
+.admin-flash {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid #cfe8cf;
+  border-radius: 10px;
+  color: #2f6b2f;
+  background: #eef7ee;
+  font-size: 0.78rem;
+}
+.admin-table th.col-check,
+.admin-table td.col-check {
+  width: 42px;
+  text-align: center;
+}
+.admin-toolbar .batch-inline {
+  margin-left: auto;
+}
+</style>

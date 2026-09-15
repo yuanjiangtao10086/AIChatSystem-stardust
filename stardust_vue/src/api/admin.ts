@@ -5,6 +5,7 @@ import {
   authenticatedFetch,
 } from "@/api/client";
 import * as T from "@/types/admin";
+import { BatchDeleteResult } from "@/types/batch";
 import { UserRole, UserStatus } from "@/types/auth";
 
 const query = (
@@ -95,6 +96,11 @@ export const deleteAdminUser = (id: string) =>
   apiRequest<void>(`/api/v1/admin/users/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+export const deleteAdminUsersBatch = (ids: string[]) =>
+  apiRequest<BatchDeleteResult>("/api/v1/admin/users/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
+  });
 export const listAdminConversations = (
   params: {
     page?: number;
@@ -128,6 +134,11 @@ export const listAdminMessages = (id: string, page = 0) =>
 export const deleteAdminConversation = (id: string) =>
   apiRequest<void>(`/api/v1/admin/conversations/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+export const deleteAdminConversationsBatch = (ids: string[]) =>
+  apiRequest<BatchDeleteResult>("/api/v1/admin/conversations/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
   });
 export const deleteAdminMessage = (id: string) =>
   apiRequest<void>(`/api/v1/admin/messages/${encodeURIComponent(id)}`, {
@@ -169,6 +180,11 @@ export const getAdminFile = (id: string) =>
 export const deleteAdminFile = (id: string) =>
   apiRequest<void>(`/api/v1/admin/files/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+export const deleteAdminFilesBatch = (ids: string[]) =>
+  apiRequest<BatchDeleteResult>("/api/v1/admin/files/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
   });
 /**
  * Downloads through the audited admin endpoint. The bearer token is attached by
@@ -250,6 +266,11 @@ export const deleteAdminDocument = (id: string) =>
     `/api/v1/admin/knowledge-documents/${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
+export const deleteAdminDocumentsBatch = (ids: string[]) =>
+  apiRequest<BatchDeleteResult>("/api/v1/admin/knowledge-documents/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
+  });
 export const removeAdminVectors = (id: string) =>
   apiRequest<T.AdminKnowledgeDocument>(
     `/api/v1/admin/knowledge-documents/${encodeURIComponent(id)}/vectors`,

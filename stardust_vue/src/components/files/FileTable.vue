@@ -1,6 +1,16 @@
 <template>
   <div class="file-table">
     <div class="table-head">
+      <label class="col-check">
+        <input
+          class="ui-checkbox"
+          type="checkbox"
+          :checked="allSelected"
+          :indeterminate.prop="someSelected && !allSelected"
+          aria-label="全选当前页"
+          @change="$emit('toggle-all', !allSelected)"
+        />
+      </label>
       <span>名称</span><span>大小</span><span>上传时间</span>
     </div>
     <button
@@ -10,6 +20,15 @@
       :class="{ active: file.id === selectedId }"
       @click="$emit('select', file)"
     >
+      <label class="col-check" @click.stop>
+        <input
+          class="ui-checkbox"
+          type="checkbox"
+          :checked="selectedIds.includes(file.id)"
+          aria-label="选择文件"
+          @change="$emit('toggle', file.id)"
+        />
+      </label>
       <span class="file-name"
         ><i>{{ icon(file) }}</i
         ><span
@@ -27,7 +46,7 @@
   </div>
 </template>
 <script lang="ts">
-import { defineComponent, PropType } from "vue";
+import { computed, defineComponent, PropType } from "vue";
 import { formatBytes } from "@/api/files";
 import { UserFile } from "@/types/file";
 export default defineComponent({
@@ -35,9 +54,10 @@ export default defineComponent({
   props: {
     files: { type: Array as PropType<UserFile[]>, required: true },
     selectedId: String,
+    selectedIds: { type: Array as PropType<string[]>, default: () => [] },
   },
-  emits: ["select"],
-  setup() {
+  emits: ["select", "toggle", "toggle-all"],
+  setup(props) {
     const icon = (file: UserFile) =>
       file.previewable
         ? "▧"
@@ -56,7 +76,13 @@ export default defineComponent({
         day: "numeric",
         year: "numeric",
       }).format(new Date(value));
-    return { bytes: formatBytes, date, icon };
+    const allSelected = computed(
+      () =>
+        props.files.length > 0 &&
+        props.files.every((f) => props.selectedIds.includes(f.id))
+    );
+    const someSelected = computed(() => props.selectedIds.length > 0);
+    return { bytes: formatBytes, date, icon, allSelected, someSelected };
   },
 });
 </script>
@@ -70,10 +96,14 @@ export default defineComponent({
 .table-head,
 button {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px 130px;
+  grid-template-columns: 40px minmax(0, 1fr) 92px 130px;
   align-items: center;
   gap: 14px;
   width: 100%;
+}
+.col-check {
+  display: grid;
+  place-items: center;
 }
 .table-head {
   min-height: 40px;
@@ -165,7 +195,7 @@ button.active {
     display: none;
   }
   button {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
     gap: 6px;
     padding: 11px 13px;
   }

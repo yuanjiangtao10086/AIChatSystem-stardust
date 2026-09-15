@@ -32,21 +32,40 @@
         "
         @keyup.enter="$emit('search')"
     /></label>
-    <div class="search-mode" role="group" aria-label="搜索范围">
-      <button
-        type="button"
-        :class="{ active: searchMode === 'title' }"
-        @click="$emit('update:searchMode', 'title')"
+    <div class="search-row">
+      <div class="search-mode" role="group" aria-label="搜索范围">
+        <button
+          type="button"
+          :class="{ active: searchMode === 'title' }"
+          @click="$emit('update:searchMode', 'title')"
+        >
+          标题
+        </button>
+        <button
+          type="button"
+          :class="{ active: searchMode === 'content' }"
+          @click="$emit('update:searchMode', 'content')"
+        >
+          内容
+        </button>
+      </div>
+      <div
+        v-if="selectedIds.length && searchMode !== 'content'"
+        class="batch-inline"
       >
-        标题
-      </button>
-      <button
-        type="button"
-        :class="{ active: searchMode === 'content' }"
-        @click="$emit('update:searchMode', 'content')"
-      >
-        内容
-      </button>
+        <span>已选 {{ selectedIds.length }}</span>
+        <button type="button" :disabled="busy" @click="clearSelection">
+          取消
+        </button>
+        <button
+          type="button"
+          class="danger"
+          :disabled="busy"
+          @click="batchRemove"
+        >
+          {{ busy ? "删除中…" : "批量删除" }}
+        </button>
+      </div>
     </div>
     <div v-if="searchMode === 'content'" class="hit-list">
       <p v-if="searching" class="hit-hint">正在搜索…</p>
@@ -72,11 +91,13 @@
       </template>
     </div>
     <ConversationList
-      v-else
+      v-if="searchMode !== 'content'"
       :conversations="conversations"
       :active-id="activeId"
       :loading="loading"
+      :selected-ids="selectedIds"
       @select="$emit('close')"
+      @toggle="toggleConv"
     />
     <UsagePanel compact />
     <details class="user-menu">
@@ -102,11 +123,14 @@
   </aside>
 </template>
 <script lang="ts">
-import { computed, defineComponent, PropType } from "vue";
+import { computed, defineComponent, PropType, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import ConversationList from "./ConversationList.vue";
 import UsagePanel from "@/components/usage/UsagePanel.vue";
+import { ApiError } from "@/api/client";
+import { deleteConversationsBatch } from "@/api/conversations";
+import { BatchDeleteResult } from "@/types/batch";
 import { Conversation, MessageSearchHit } from "@/types/conversation";
 import { UserProfile } from "@/types/auth";
 import { useTheme } from "@/composables/useTheme";
@@ -136,11 +160,56 @@ export default defineComponent({
     "update:searchMode",
     "open-hit",
     "close",
+    "refresh",
   ],
-  setup(props) {
+  setup(props, { emit }) {
     const store = useStore();
     const router = useRouter();
     const { isDark, toggle } = useTheme();
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const toggleConv = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
+    const batchRemove = async () => {
+      if (!selectedIds.value.length) return;
+      if (
+        !window.confirm(
+          `确认批量删除选中的 ${selectedIds.value.length} 个对话吗？此操作不可恢复。`
+        )
+      )
+        return;
+      busy.value = true;
+      const ids = [...selectedIds.value];
+      try {
+        const result: BatchDeleteResult = await deleteConversationsBatch(ids);
+        selectedIds.value = [];
+        // 当前打开的对话若在选中集合且未被计入失败，说明已被删除，退回新对话页。
+        if (
+          props.activeId &&
+          ids.includes(props.activeId) &&
+          !result.failures.some((failure) => failure.id === props.activeId)
+        ) {
+          await router.push({ name: "chat" });
+        }
+        emit("refresh");
+      } catch (error) {
+        window.alert(
+          error instanceof ApiError
+            ? `${error.message}${
+                error.requestId ? ` · ${error.requestId}` : ""
+              }`
+            : "批量删除失败。"
+        );
+      } finally {
+        busy.value = false;
+      }
+    };
     const user = computed(() => store.state.auth.user as UserProfile | null);
     const canAdmin = computed(
       () => store.getters["auth/canAccessAdmin"] as boolean
@@ -171,6 +240,11 @@ export default defineComponent({
       isDark,
       toggleTheme: toggle,
       logout,
+      selectedIds,
+      busy,
+      toggleConv,
+      clearSelection,
+      batchRemove,
     };
   },
 });
@@ -261,6 +335,14 @@ export default defineComponent({
 }
 .search-box input::placeholder {
   color: var(--ink-faint);
+}
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-row .batch-inline {
+  margin-left: auto;
 }
 .search-mode {
   display: flex;

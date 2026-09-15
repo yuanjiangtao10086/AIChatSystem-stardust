@@ -17,9 +17,16 @@ vi.mock("@/api/client", () => ({
 const { authenticatedFetch } = await import("@/api/client");
 
 const closedStream = () =>
-  new Response(new ReadableStream({ start(controller) { controller.close(); } }), {
-    status: 200,
-  });
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+    }
+  );
 
 const file = (id: string): FileReference => ({
   id,
@@ -68,7 +75,9 @@ describe("streamConversationMessage", () => {
       new AbortController().signal,
       () => undefined
     );
-    const body = JSON.parse(vi.mocked(authenticatedFetch).mock.calls[0][1].body as string);
+    const body = JSON.parse(
+      vi.mocked(authenticatedFetch).mock.calls[0][1].body as string
+    );
     expect(body.attachmentIds).toEqual([]);
   });
 });
@@ -95,7 +104,12 @@ describe("editAndResendMessage", () => {
 
 describe("regenerateMessage", () => {
   it("does not send attachments (the original user message carries them)", async () => {
-    await regenerateMessage("m1", "m1", new AbortController().signal, () => undefined);
+    await regenerateMessage(
+      "m1",
+      "m1",
+      new AbortController().signal,
+      () => undefined
+    );
     const [url, init] = vi.mocked(authenticatedFetch).mock.calls[0];
     expect(url).toContain("/api/v1/messages/m1/regenerate");
     const body = JSON.parse(init.body as string);

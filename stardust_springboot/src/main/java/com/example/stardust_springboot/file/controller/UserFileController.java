@@ -2,6 +2,8 @@ package com.example.stardust_springboot.file.controller;
 
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.common.api.ApiResult;
+import com.example.stardust_springboot.common.api.BatchDeleteRequest;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.common.web.ClientIpResolver;
 import com.example.stardust_springboot.file.dto.FileView;
@@ -101,6 +103,12 @@ public class UserFileController {
                                        @PathVariable String fileId) {
         fileService.delete(principal, fileId);
         return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/batch")
+    public ApiResult<BatchDeleteResult> deleteBatch(@AuthenticationPrincipal AuthenticatedUser principal,
+                                                    @Valid @RequestBody BatchDeleteRequest request) {
+        return ApiResult.success(fileService.batchDelete(principal, request.ids()));
     }
 
     private ResponseEntity<InputStreamResource> content(FileDownload file, boolean inline) {

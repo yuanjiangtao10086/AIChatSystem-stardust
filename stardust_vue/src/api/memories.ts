@@ -1,4 +1,5 @@
 import { apiRequest } from "@/api/client";
+import { BatchDeleteResult } from "@/types/batch";
 import {
   MemoryInput,
   MemoryPage,
@@ -57,5 +58,12 @@ export function setMemoryEnabled(
 export function deleteMemory(id: string): Promise<void> {
   return apiRequest(`/api/v1/memories/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+export function deleteMemoriesBatch(ids: string[]): Promise<BatchDeleteResult> {
+  return apiRequest("/api/v1/memories/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
   });
 }

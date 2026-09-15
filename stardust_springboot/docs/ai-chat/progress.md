@@ -1,7 +1,7 @@
 # AI Chat SaaS 开发进度
 
 > 最近更新：2026-09-11  
-> 当前阶段：阶段 13「统计聚合、共享限流器、可观测性」已完成；阶段 12 用量与额度闭环已完成；阶段 11「管理员后台与审计」已完成（11A 用户管理 / 11B 聊天管理 / 11C 文件与云盘管理 / 11D 知识库与 RAG 管理）
+> 当前阶段：阶段 14「AI 回答生成文件与下载（Artifact）」已完成；阶段 13 统计聚合/共享限流/可观测性已完成；阶段 12 用量与额度闭环已完成；阶段 11「管理员后台与审计」已完成（11A 用户管理 / 11B 聊天管理 / 11C 文件与云盘管理 / 11D 知识库与 RAG 管理）
 
 ## 专项：AI Chat 首字响应（TTFT）延迟诊断与修复
 
@@ -111,6 +111,29 @@
 - [ ] 对账仍为全表扫描 `ai_usage_account`，用户量增长后需分片。
 - [ ] Prometheus 拉取需独立 bearer/管理端口策略；当前 `/actuator/**` 仅 ADMIN 可访问，Grafana 侧需配置对应凭据或管理端口。
 - [ ] 告警规则（如 drift>0、限流命中突增）由运维在 Grafana/Prometheus 侧配置，后端只负责产出指标。
+
+## 阶段 14：AI 回答生成文件与下载（Artifact）
+
+状态：Completed
+
+- [x] **触发方式**：LLM 通过 OpenAI 兼容 `create_artifact` function tool 触发；Python `ChatService` 在文本流结束后累加 `tool_calls` 并统一生成文件，绝不在可见正文里嵌入文件内容（ADR-065）。不支持 tool 的 Provider 不产生 artifact，聊天不受影响。
+- [x] **生成与传输**：`app/services/artifacts/` 下 `ArtifactService` + `ArtifactGenerator` 接口/工厂；文本类（py/md/txt/csv/json/html/sql/yaml/xml）由 `TextArtifactGenerator` 直接包装内容；Office（docx/pptx/xlsx）由 python-docx/python-pptx/openpyxl 生成（无宏）。生成在内存完成，按 64KB base64 分片经 `artifact_delta` 回传，避免大对象一次性塞入单条 SSE。
+- [x] **内部 SSE 新事件**：`artifact_start` / `artifact_delta` / `artifact_done` / `artifact_error`（沿用 `type/seq/aiRequestId`，`artifactType` 字段避免与根级 `type` 冲突）。`done` 终态可携带 `files` 数组。
+- [x] **Spring 落盘**：`JdkHttpAiGateway` 已登记这 4 个事件；`AiStreamingService` 在 `artifact_done` 时调用 `MessageArtifactService.persist`：二次 MIME/扩展名/大小校验（`FileTypePolicy.validateGenerated`，重新 sniff 字节，禁止伪造）→ 储备 `user_storage_usage` → `StorageService` 写入 → 建 `user_file`(AVAILABLE) → 建 `chat_message_attachment`(type=OUTPUT)。生成失败只发 `artifact_error`，聊天仍 `done`（ADR-065）。
+- [x] **下载复用既有入口**：`GET /api/v1/files/{id}/download` 带 `user_id` 归属校验；云盘列表（`GET /api/v1/files`）天然可见 AI 生成文件（ADR-043 延续）。
+- [x] **权限/安全**：owner-scoped 查询（`WHERE id=? AND user_id=?`）；单文件 <=10MB（Spring `app.storage.artifact-max-bytes` 与 Python `artifact_max_bytes` 双重限制）；扩展名/ MIME 白名单（新增 py/html/htm/sql/yaml/yml/xml）；禁止绝对路径/穿越（沿用 `FileTypePolicy.normalizeName`）；不执行 .py、不为 Office 生成宏；日志只记录 `artifactId/filename/size`，不记文件内容或密钥。
+
+### 验证
+
+- Python：`tests/test_artifact_service.py`（文本/Office/越界/非法类型）+ `tests/test_chat_service_artifacts.py`（tool 触发流式 artifact_start/delta/done、非法指令 artifact_error、无 tool 无 artifact、Office 流式）通过；`ruff` 通过；`python-docx/python-pptx/openpyxl` 加入 `pyproject.toml`。
+- Spring：`FileTypePolicyTests` 4 项（白名单/越界/伪造 MIME）通过；既有 `AiStreamingIntegrationTests` 等回归全绿；`mvn -o package -DskipTests` 成功（无 schema 变更，`attachment_type` 仅新增枚举值 `OUTPUT`，Flyway 无新增 migration）。
+- Vue：`npm run typecheck` 通过；新增 `ChatArtifactCard.vue` / `ChatArtifactList.vue`，`chatStreamReducer` 消费 artifact 事件，`ChatMessage` 渲染卡片，下载走 `downloadFile`（不直连 Python）；`npm run build` 成功。
+
+### 已知边界
+
+- [ ] tool calling 依赖 Provider 支持；不支持的 Provider 该轮不生成文件（不进 JSON 协议兜底，保持 Provider 无关与可测，见 ADR-065）。
+- [ ] `artifact_delta` 当前仅用于服务端缓冲与“生成中”状态；Vue 不做文本类在线预览（Office 仅下载）。
+- [ ] 管理员审计暂时不强制记录每次生成/下载（敏感操作可记录，未实现）。
 
 ## 阶段 12 第二批：用量 UI、管理员额度调整、登录限流与周期对账
 

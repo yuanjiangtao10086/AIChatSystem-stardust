@@ -23,6 +23,7 @@ from app.schemas.chat import (
     ChatRole,
 )
 from app.services.attachments import build_attachment_context
+from app.services.artifacts.artifact_service import ArtifactService
 from app.services.chat import ChatService
 from tests.fakes import StubProvider
 
@@ -147,7 +148,9 @@ async def test_chat_service_folds_attachments_into_provider_messages() -> None:
     settings = Settings(
         internal_service_token=SecretStr("x" * 32), openai_compatible_default_model="m"
     )
-    service = ChatService(ProviderRegistry({"openai-compatible": provider}), settings)
+    service = ChatService(
+        ProviderRegistry({"openai-compatible": provider}), settings, ArtifactService(settings)
+    )
 
     await service.chat(request_with(text_attachment(), image_attachment()))
 
@@ -167,7 +170,9 @@ async def test_chat_service_folds_attachments_into_provider_messages() -> None:
 async def test_chat_service_keeps_user_turn_last_without_attachments() -> None:
     provider = StubProvider()
     settings = Settings(openai_compatible_default_model="m")
-    service = ChatService(ProviderRegistry({"openai-compatible": provider}), settings)
+    service = ChatService(
+        ProviderRegistry({"openai-compatible": provider}), settings, ArtifactService(settings)
+    )
 
     request = request_with()
     await service.chat(request)
@@ -233,7 +238,9 @@ def test_image_attachment_without_bytes_is_reported_instead_of_sent() -> None:
 async def test_stream_survives_attachment_rendering_and_emits_terminal_event() -> None:
     settings = Settings(openai_compatible_default_model="m")
     service = ChatService(
-        ProviderRegistry({"openai-compatible": StubProvider()}), settings
+        ProviderRegistry({"openai-compatible": StubProvider()}),
+        settings,
+        ArtifactService(settings),
     )
     events = "".join(
         [event async for event in service.stream(request_with(text_attachment()))]

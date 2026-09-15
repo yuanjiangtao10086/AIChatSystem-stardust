@@ -952,3 +952,157 @@ input:disabled {
   color: var(--ink-faint);
   font-size: 0.75rem;
 }
+
+/* ---------- 批量选择：复选框（统一外观） ---------- */
+.ui-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid #c7cdd9;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.ui-checkbox:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.ui-checkbox:checked,
+.ui-checkbox:indeterminate {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.ui-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 5.5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.ui-checkbox:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: 7px;
+  width: 9px;
+  height: 2px;
+  border-radius: 2px;
+  background: #fff;
+}
+.ui-checkbox:focus,
+.ui-checkbox:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.22);
+}
+.ui-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  background: var(--surface-soft);
+}
+
+/* ---------- 批量选择：操作条（用户端 / 管理端通用） ---------- */
+.batch-bar,
+.admin-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 9px 12px 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.batch-bar > span,
+.admin-batch-bar > span {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.batch-bar button,
+.admin-batch-bar button {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
+}
+.batch-bar button:hover:not(:disabled),
+.admin-batch-bar button:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+.batch-bar .danger,
+.admin-batch-bar .row-danger {
+  margin-left: auto;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.batch-bar .danger:hover:not(:disabled),
+.admin-batch-bar .row-danger:hover:not(:disabled) {
+  background: #fdeceb;
+}
+.batch-bar button:disabled,
+.admin-batch-bar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- 批量选择：内联工具条（嵌在搜索/筛选行内，不占独立一栏） ---------- */
+.batch-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+.batch-inline > span {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.batch-inline button {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
+}
+.batch-inline button:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+.batch-inline button.danger,
+.batch-inline button.row-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--surface);
+}
+.batch-inline button.danger:hover:not(:disabled),
+.batch-inline button.row-danger:hover:not(:disabled) {
+  background: #fdeceb;
+}
+.batch-inline button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     rag_chunk_chars: int = Field(default=1800, ge=256, le=8000)
     rag_chunk_overlap_chars: int = Field(default=180, ge=0, le=2000)
     rag_vector_store_path: Path = Path("./data/rag-vectors.sqlite3")
+    # AI-generated downloadable files: hard cap on a single generated artifact. Kept well
+    # below the internal SSE event size budget; Spring enforces the same cap on its side.
+    artifact_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0, le=100 * 1024 * 1024)
 
     @property
     def internal_api_configured(self) -> bool:

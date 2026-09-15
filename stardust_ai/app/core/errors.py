@@ -77,3 +77,21 @@ class ProviderProtocolError(ProviderError):
 class VectorStoreError(AiServiceError):
     def __init__(self) -> None:
         super().__init__("VECTOR_STORE_ERROR", "vector store operation failed", 500)
+
+
+class ArtifactError(AiServiceError):
+    """A downloadable-file generation failed.
+
+    Carries a stable error ``code`` the streaming layer maps to an ``artifact_error`` SSE
+    event so a bad file never fails the whole chat. Status defaults to 500; size/type
+    violations use 413/415 so the Spring side can mirror the HTTP semantics.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int = 500,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(code, message, status_code, retryable)

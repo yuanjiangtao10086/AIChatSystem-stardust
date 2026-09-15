@@ -70,12 +70,30 @@
               ><small>解析 → 清洗 → 切分 → 向量化 → 入库</small>
             </div>
           </div>
-          <span>共 {{ documents.length }} 个文档</span>
+          <div class="section-title-right">
+            <div v-if="selectedIds.length" class="batch-inline">
+              <span>已选 {{ selectedIds.length }} 个</span>
+              <button type="button" :disabled="busy" @click="clearSelection">
+                取消选择
+              </button>
+              <button
+                type="button"
+                class="danger"
+                :disabled="busy"
+                @click="batchRemove"
+              >
+                {{ busy ? "删除中…" : "批量删除" }}
+              </button>
+            </div>
+            <span>共 {{ documents.length }} 个文档</span>
+          </div>
         </div>
         <DocumentPipelineList
           :items="documents"
+          :selected-ids="selectedIds"
           @retry="retry"
           @delete="removeDocument"
+          @toggle="toggleDocument"
         />
       </section>
       <div v-else class="welcome">
@@ -127,6 +145,7 @@ import {
   createKnowledgeBase,
   deleteKnowledgeBase,
   deleteKnowledgeDocument,
+  deleteKnowledgeDocumentsBatch,
   listKnowledgeBases,
   listKnowledgeDocuments,
   retryKnowledgeDocument,
@@ -154,6 +173,16 @@ export default defineComponent({
     const selected = computed(
       () => bases.value.find((item) => item.id === selectedId.value) || null
     );
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const toggleDocument = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
     const describe = (cause: unknown) =>
       cause instanceof ApiError
         ? `${cause.message}${cause.requestId ? ` · ${cause.requestId}` : ""}`
@@ -275,6 +304,33 @@ export default defineComponent({
         notice.value = describe(cause);
       }
     };
+    const batchRemove = async () => {
+      if (!selectedIds.value.length) return;
+      if (
+        !confirm(
+          `确认批量删除选中的 ${selectedIds.value.length} 个文档吗？将同时移除分块与向量数据，源文件仍保留在云盘中。`
+        )
+      )
+        return;
+      busy.value = true;
+      notice.value = "";
+      try {
+        const result = await deleteKnowledgeDocumentsBatch([
+          ...selectedIds.value,
+        ]);
+        selectedIds.value = [];
+        await loadDocuments();
+        notice.value =
+          `已删除 ${result.deleted} 个文档` +
+          (result.failures.length
+            ? `，${result.failures.length} 个删除失败。`
+            : "。");
+      } catch (cause) {
+        notice.value = describe(cause);
+      } finally {
+        busy.value = false;
+      }
+    };
     onMounted(loadBases);
     return {
       bases,
@@ -298,6 +354,11 @@ export default defineComponent({
       selectedId,
       upload,
       uploading,
+      selectedIds,
+      busy,
+      toggleDocument,
+      clearSelection,
+      batchRemove,
     };
   },
 });
@@ -472,6 +533,11 @@ export default defineComponent({
 .section-title > span {
   color: #8791a2;
   font-size: 0.72rem;
+}
+.section-title-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .welcome {
   display: grid;

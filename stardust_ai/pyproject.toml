@@ -9,6 +9,10 @@ dependencies = [
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
     "uvicorn==0.52.4",
+    "python-docx==1.1.2",
+    "python-pptx==1.0.2",
+    "openpyxl==3.1.5",
+    "reportlab==4.2.5",
 ]
 
 [project.scripts]
@@ -27,6 +31,11 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 packages = [{include = "app"}]
+
+[[tool.poetry.source]]
+name = "mirrors"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+priority = "primary"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

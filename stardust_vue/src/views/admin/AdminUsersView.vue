@@ -30,9 +30,24 @@
       >
         + 新建用户
       </button>
+      <div v-if="selectedIds.length" class="batch-inline">
+        <span>已选 {{ selectedIds.length }} 个用户</span>
+        <button type="button" :disabled="busy" @click="clearSelection">
+          取消选择
+        </button>
+        <button
+          type="button"
+          class="row-danger"
+          :disabled="busy"
+          @click="batchRemove"
+        >
+          {{ busy ? "删除中…" : "批量删除" }}
+        </button>
+      </div>
     </div>
 
     <p v-if="error" class="admin-error">{{ error }}</p>
+    <p v-if="flash" class="admin-flash">{{ flash }}</p>
 
     <div v-if="loading" class="admin-loading">加载中…</div>
 
@@ -48,6 +63,16 @@
         <table class="admin-table">
           <thead>
             <tr>
+              <th class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="pageData.items.length > 0 && allSelected"
+                  :indeterminate.prop="someSelected && !allSelected"
+                  aria-label="全选当前页"
+                  @change="toggleAll(!allSelected)"
+                />
+              </th>
               <th>用户</th>
               <th>状态</th>
               <th>角色</th>
@@ -59,6 +84,16 @@
           </thead>
           <tbody>
             <tr v-for="u in pageData.items" :key="u.id">
+              <td class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="selectedIds.includes(u.id)"
+                  :disabled="u.status === 'DELETED' || u.id === meId"
+                  aria-label="选择用户"
+                  @change="toggle(u.id)"
+                />
+              </td>
               <td>
                 <button
                   class="admin-user-link"
@@ -228,6 +263,7 @@ import {
   setAdminUserStatus,
   restoreAdminUser,
   deleteAdminUser,
+  deleteAdminUsersBatch,
   resetAdminPassword,
   setAdminUserRoles,
 } from "@/api/admin";
@@ -277,6 +313,37 @@ export default defineComponent({
     const pageData = ref<AdminUserPage | null>(null);
     const loading = ref(false);
     const error = ref("");
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const flash = ref("");
+    const meId = computed(() => me.value?.id ?? "");
+    const allSelected = computed(
+      () =>
+        !!pageData.value &&
+        pageData.value.items.length > 0 &&
+        pageData.value.items.every(
+          (u) =>
+            selectedIds.value.includes(u.id) &&
+            u.status !== "DELETED" &&
+            u.id !== meId.value
+        )
+    );
+    const someSelected = computed(() => selectedIds.value.length > 0);
+    const toggle = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const toggleAll = (on: boolean) => {
+      if (!pageData.value) return;
+      const selectable = pageData.value.items
+        .filter((u) => u.status !== "DELETED" && u.id !== meId.value)
+        .map((u) => u.id);
+      selectedIds.value = on ? selectable : [];
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
 
     let searchTimer: number | undefined;
     const onSearchInput = () => {
@@ -499,6 +566,33 @@ export default defineComponent({
     onMounted(load);
     onUnmounted(() => window.clearTimeout(searchTimer));
 
+    const batchRemove = async () => {
+      const ids = selectedIds.value.filter((id) => id !== meId.value);
+      if (!ids.length) return;
+      if (
+        !window.confirm(
+          `确认批量软删除选中的 ${ids.length} 个用户吗？其数据和原因将写入审计日志，可随后恢复。`
+        )
+      )
+        return;
+      busy.value = true;
+      flash.value = "";
+      try {
+        const result = await deleteAdminUsersBatch(ids);
+        selectedIds.value = [];
+        await load();
+        flash.value =
+          `已删除 ${result.deleted} 个用户` +
+          (result.failures.length
+            ? `，${result.failures.length} 个删除失败。`
+            : "。");
+      } catch (e) {
+        flash.value = e instanceof Error ? e.message : "批量删除失败";
+      } finally {
+        busy.value = false;
+      }
+    };
+
     return {
       search,
       statusFilter,
@@ -546,7 +640,36 @@ export default defineComponent({
       formatBytes,
       formatDateTime,
       formatNumber,
+      selectedIds,
+      busy,
+      flash,
+      meId,
+      allSelected,
+      someSelected,
+      toggle,
+      toggleAll,
+      clearSelection,
+      batchRemove,
     };
   },
 });
 </script>
+<style scoped>
+.admin-flash {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid #cfe8cf;
+  border-radius: 10px;
+  color: #2f6b2f;
+  background: #eef7ee;
+  font-size: 0.78rem;
+}
+.admin-table th.col-check,
+.admin-table td.col-check {
+  width: 42px;
+  text-align: center;
+}
+.admin-toolbar .batch-inline {
+  margin-left: auto;
+}
+</style>

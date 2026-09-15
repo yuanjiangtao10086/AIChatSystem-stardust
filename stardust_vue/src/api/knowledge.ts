@@ -1,4 +1,5 @@
 import { apiRequest } from "@/api/client";
+import { BatchDeleteResult } from "@/types/batch";
 import {
   ConversationKnowledgeBases,
   KnowledgeBase,
@@ -78,6 +79,15 @@ export function retryKnowledgeDocument(id: string): Promise<KnowledgeDocument> {
 export function deleteKnowledgeDocument(id: string): Promise<void> {
   return apiRequest(`/api/v1/knowledge-documents/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+export function deleteKnowledgeDocumentsBatch(
+  ids: string[]
+): Promise<BatchDeleteResult> {
+  return apiRequest("/api/v1/knowledge-documents/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
   });
 }
 

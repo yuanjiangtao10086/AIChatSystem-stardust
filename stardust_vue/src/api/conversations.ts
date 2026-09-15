@@ -14,6 +14,7 @@ import {
   PageResult,
 } from "@/types/conversation";
 import { FileReference } from "@/types/file";
+import { BatchDeleteResult } from "@/types/batch";
 import { consumeSseChunk, parseSseBlock } from "@/api/sseParser";
 
 export interface ConversationQuery {
@@ -67,6 +68,15 @@ export function deleteEmptyConversations(keepId?: string): Promise<number> {
 
 export function getConversation(id: string): Promise<Conversation> {
   return apiRequest(`/api/v1/conversations/${encodeURIComponent(id)}`);
+}
+
+export function deleteConversationsBatch(
+  ids: string[]
+): Promise<BatchDeleteResult> {
+  return apiRequest("/api/v1/conversations/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
+  });
 }
 
 export function listMessages(id: string): Promise<PageResult<ChatMessage>> {

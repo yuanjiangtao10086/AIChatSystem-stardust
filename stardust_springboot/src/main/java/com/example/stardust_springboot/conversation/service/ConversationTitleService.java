@@ -5,7 +5,7 @@ import com.example.stardust_springboot.ai.gateway.AiGateway;
 import com.example.stardust_springboot.ai.gateway.AiGatewayEvent;
 import com.example.stardust_springboot.ai.gateway.AiGatewayException;
 import com.example.stardust_springboot.ai.gateway.AiGatewayRequest;
-import com.example.stardust_springboot.ai.gateway.AiGatewayRequest.AiGatewayMessage;
+import com.example.stardust_springboot.ai.gateway.AiGatewayMessage;
 import com.example.stardust_springboot.ai.gateway.StreamCancellation;
 import com.example.stardust_springboot.ai.repository.AiModelRepository;
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;

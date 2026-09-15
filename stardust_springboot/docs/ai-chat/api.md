@@ -531,7 +531,11 @@ data: {"type":"delta","requestId":"01K...","conversationId":"01K...","messageId"
 | `tool_start` | `toolCallId`, `name` | 未来工具调用开始 |
 | `tool_delta` | `toolCallId`, `delta` | 未来工具调用参数增量 |
 | `tool_done` | `toolCallId`, `status` | 未来工具调用结束 |
-| `done` | `status`, `finishReason` | 正常/主动停止终态；对应终态事务已提交 |
+| `artifact_start` | `artifactId`, `filename`, `mimeType`, `artifactType`, `size` | AI 开始生成一个可下载文件；`artifactId` 贯穿后续事件 |
+| `artifact_delta` | `artifactId`, `content`(base64) | 文件内容分片（base64，服务端缓冲）；每片远小于 1MB |
+| `artifact_done` | `artifactId`, `fileId`, `filename`, `mimeType`, `size`, `sha256`, `downloadUrl` | 文件已落盘并写入 `user_file`；`downloadUrl` 指向 `/api/v1/files/{id}/download` |
+| `artifact_error` | `artifactId`, `code`, `message` | 单个文件生成失败；不影响聊天完成，消息仍 `done` |
+| `done` | `status`, `finishReason`, `files?` | 终态；`files` 为本次生成的文件摘要数组（当存在时） |
 | `error` | `code`, `message`, `retryable`, `partial` | 失败终止；partial 表示已经保存部分回答，不包含上游 secret/stack |
 
 `finishReason` 建议枚举：`STOP`、`LENGTH`、`USER_CANCELLED`、`CONTENT_FILTER`、`TOOL_CALL`。消息持久化状态与 Provider finish reason 分开。
@@ -599,7 +603,7 @@ traceparent: 00-...-...-01
 
 ### 5.4 Python SSE
 
-阶段 5 Python 实现 `start/delta/reasoning/usage/done/error`；每个事件包含根级 `type/schemaVersion/aiRequestId/requestId/seq/timestamp` 与 `payload`。Spring 严格校验事件名、根级 `type`、`aiRequestId` 和从 0 开始的连续 `seq`，补全外部 `conversationId/messageId` 并做错误脱敏。`citation/tool_start/tool_delta/tool_done` 已作为保留类型贯穿契约，但本阶段不产生这些事件。
+阶段 5 Python 实现 `start/delta/reasoning/usage/done/error`；每个事件包含根级 `type/schemaVersion/aiRequestId/requestId/seq/timestamp` 与 `payload`。Spring 严格校验事件名、根级 `type`、`aiRequestId` 和从 0 开始的连续 `seq`，补全外部 `conversationId/messageId` 并做错误脱敏。`citation/tool_start/tool_delta/tool_done` 已作为保留类型贯穿契约，本阶段不产生这些事件；阶段 14 起 `artifact_start/artifact_delta/artifact_done/artifact_error` 已落地（AI 生成文件），内部与公共 SSE 均贯穿，`artifactType` 字段用于避免与根级 `type` 冲突。
 
 Python 终止错误示例：
 

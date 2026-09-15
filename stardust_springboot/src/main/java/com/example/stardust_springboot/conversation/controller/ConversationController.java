@@ -2,6 +2,8 @@ package com.example.stardust_springboot.conversation.controller;
 
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.common.api.ApiResult;
+import com.example.stardust_springboot.common.api.BatchDeleteRequest;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.conversation.dto.ConversationView;
 import com.example.stardust_springboot.conversation.dto.CreateConversationRequest;
@@ -101,6 +103,12 @@ public class ConversationController {
                                        @PathVariable String conversationId) {
         conversationService.delete(principal, conversationId);
         return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/batch")
+    public ApiResult<BatchDeleteResult> deleteBatch(@AuthenticationPrincipal AuthenticatedUser principal,
+                                                    @Valid @RequestBody BatchDeleteRequest request) {
+        return ApiResult.success(conversationService.batchDelete(principal, request.ids()));
     }
 
     @PostMapping("/{conversationId}/title")

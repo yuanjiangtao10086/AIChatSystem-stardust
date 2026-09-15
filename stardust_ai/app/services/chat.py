@@ -1,11 +1,14 @@
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from app.core.errors import AiServiceError, ServiceNotConfiguredError
+from app.core.errors import AiServiceError, ArtifactError, ServiceNotConfiguredError
 from app.core.request_context import current_request_id
 from app.core.settings import Settings
 from app.providers.registry import ProviderRegistry
@@ -15,6 +18,7 @@ from app.providers.types import (
     ProviderMessageRole,
     TextPart,
     TokenUsage,
+    ToolCall,
 )
 from app.schemas.chat import (
     ChatMessage,
@@ -24,15 +28,24 @@ from app.schemas.chat import (
     StreamEvent,
 )
 from app.schemas.chat import TokenUsage as TokenUsageSchema
+from app.services.artifacts.artifact_service import ArtifactService
+from app.services.artifacts.schemas import ArtifactInstruction
+from app.schemas.artifacts import build_create_artifact_tool
 from app.services.attachments import AttachmentContext, build_attachment_context
 
 logger = logging.getLogger(__name__)
 
+# Defence against a model emitting a flood of tool calls in one turn.
+MAX_ARTIFACTS_PER_REQUEST = 8
+
 
 class ChatService:
-    def __init__(self, registry: ProviderRegistry, settings: Settings) -> None:
+    def __init__(
+        self, registry: ProviderRegistry, settings: Settings, artifact_service: ArtifactService
+    ) -> None:
         self._registry = registry
         self._settings = settings
+        self._artifact_service = artifact_service
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         provider = self._registry.get(request.provider_key)
@@ -57,6 +70,7 @@ class ChatService:
         usage_sent = False
         resolved_request_id = request_id or current_request_id()
         finish_reason: str | None = None
+        pending_tool_calls: list[ToolCall] = []
         start_ns = time.perf_counter_ns()
         first_token_ns: int | None = None
         logger.info(
@@ -83,7 +97,9 @@ class ChatService:
                 ),
             )
             seq += 1
-            async for chunk in provider.stream_chat(self._to_provider_request(request)):
+            async for chunk in provider.stream_chat(
+                self._to_provider_request(request, (build_create_artifact_tool(),))
+            ):
                 if first_token_ns is None and (chunk.content or chunk.reasoning_content):
                     first_token_ns = time.perf_counter_ns()
                     logger.info(
@@ -165,6 +181,8 @@ class ChatService:
                         ),
                     )
                     seq += 1
+                if chunk.tool_calls:
+                    pending_tool_calls.extend(chunk.tool_calls)
                 if chunk.finish_reason is not None:
                     finish_reason = chunk.finish_reason
             if not usage_sent:
@@ -186,6 +204,13 @@ class ChatService:
                     ),
                 )
                 seq += 1
+            # Artifacts are generated AFTER the text stream ends but BEFORE `done`, so `done`
+            # stays the single terminal event while the generated files are already reflected.
+            seq, artifact_events = self._process_artifacts(
+                request, resolved_request_id, seq, pending_tool_calls
+            )
+            for event in artifact_events:
+                yield event
             yield self._sse(
                 "done",
                 StreamEvent(
@@ -240,12 +265,155 @@ class ChatService:
                 ),
             )
 
-    def _to_provider_request(self, request: ChatRequest) -> ProviderChatRequest:
+    def _process_artifacts(
+        self,
+        request: ChatRequest,
+        resolved_request_id: str,
+        seq: int,
+        tool_calls: list[ToolCall],
+    ) -> tuple[int, list[str]]:
+        """Turn ``create_artifact`` tool calls into artifact SSE events.
+
+        A failure only emits ``artifact_error`` for that file; it never propagates, so the
+        chat answer still completes. Returns the advanced sequence counter and the rendered
+        SSE strings to yield.
+        """
+        events: list[str] = []
+        generated = 0
+        next_seq = seq
+
+        def emit(event_type: str, payload: dict[str, object]) -> None:
+            # Allocate seq with the same "use then increment" convention as the main stream
+            # loop, so Spring's strict contiguous-seq check never trips.
+            nonlocal next_seq
+            events.append(
+                self._sse(
+                    event_type,
+                    StreamEvent(
+                        type=event_type,
+                        ai_request_id=request.ai_request_id,
+                        request_id=resolved_request_id,
+                        seq=next_seq,
+                        timestamp=self._timestamp(),
+                        payload=payload,
+                    ),
+                )
+            )
+            next_seq += 1
+
+        for call in tool_calls:
+            if call.name != "create_artifact":
+                continue
+            generated += 1
+            if generated > MAX_ARTIFACTS_PER_REQUEST:
+                emit(
+                    "artifact_error",
+                    {
+                        "artifactId": None,
+                        "code": "ARTIFACT_LIMIT_EXCEEDED",
+                        "message": "too many artifacts in one response",
+                    },
+                )
+                continue
+            args = self._parse_tool_args(call)
+            if not isinstance(args, dict):
+                emit(
+                    "artifact_error",
+                    {
+                        "artifactId": None,
+                        "code": "ARTIFACT_INVALID_SPEC",
+                        "message": "artifact instruction must be a JSON object",
+                    },
+                )
+                continue
+            try:
+                instruction = ArtifactInstruction.model_validate(args)
+            except Exception as error:
+                logger.warning("artifact instruction invalid ai_request_id=%s: %s", request.ai_request_id, error)
+                emit(
+                    "artifact_error",
+                    {
+                        "artifactId": args.get("artifactId"),
+                        "code": "ARTIFACT_INVALID_SPEC",
+                        "message": "artifact instruction failed validation",
+                    },
+                )
+                continue
+            if not instruction.artifact_id:
+                instruction.artifact_id = uuid.uuid4().hex
+            try:
+                artifact = self._artifact_service.generate(instruction)
+            except ArtifactError as error:
+                emit(
+                    "artifact_error",
+                    {
+                        "artifactId": instruction.artifact_id,
+                        "code": error.code,
+                        "message": error.message,
+                    },
+                )
+                continue
+            except Exception:
+                logger.exception(
+                    "artifact generation failed ai_request_id=%s artifact_id=%s",
+                    request.ai_request_id,
+                    instruction.artifact_id,
+                )
+                emit(
+                    "artifact_error",
+                    {
+                        "artifactId": instruction.artifact_id,
+                        "code": "ARTIFACT_GENERATION_FAILED",
+                        "message": "artifact generation failed",
+                    },
+                )
+                continue
+            sha256 = self._artifact_service.sha256(artifact.data)
+            emit(
+                "artifact_start",
+                {
+                    "artifactId": artifact.artifact_id,
+                    "filename": artifact.filename,
+                    "mimeType": artifact.mime_type,
+                    "artifactType": artifact.type.value,
+                    "size": artifact.size,
+                },
+            )
+            for piece in self._b64_chunks(artifact.data, 64 * 1024):
+                emit("artifact_delta", {"artifactId": artifact.artifact_id, "content": piece})
+            emit(
+                "artifact_done",
+                {
+                    "artifactId": artifact.artifact_id,
+                    "filename": artifact.filename,
+                    "mimeType": artifact.mime_type,
+                    "size": artifact.size,
+                    "sha256": sha256,
+                },
+            )
+        return next_seq, events
+
+    @staticmethod
+    def _parse_tool_args(call: ToolCall) -> object:
+        try:
+            return json.loads(call.arguments or "{}")
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _b64_chunks(data: bytes, size: int) -> list[str]:
+        encoded = base64.b64encode(data).decode("ascii")
+        return [encoded[i : i + size] for i in range(0, len(encoded), size)]
+
+    def _to_provider_request(
+        self, request: ChatRequest, tools: tuple[dict, ...] = ()
+    ) -> ProviderChatRequest:
         return ProviderChatRequest(
             model=self._resolve_model(request),
             messages=self._build_messages(request),
             temperature=request.temperature,
             max_output_tokens=request.max_output_tokens,
+            tools=tools,
         )
 
     def _build_messages(self, request: ChatRequest) -> tuple[ProviderMessage, ...]:
@@ -272,22 +440,36 @@ class ChatService:
                 last_user_index = index
 
         messages: list[ProviderMessage] = []
+        messages.append(ProviderMessage(
+            ProviderMessageRole.SYSTEM,
+            "When the user asks for a file, script, document, spreadsheet, presentation, PDF, or any "
+            "code (e.g. .py, .sql, .md, .txt, .csv, .json, .html, .yaml, .xml, .docx, .pptx, .xlsx, .pdf), "
+            "you MUST use the create_artifact tool to deliver the file. NEVER put long file contents "
+            "directly in the chat reply; write only a brief plain-text explanation and put the full "
+            "content in the artifact's content/spec field.",
+        ))
         if last_user_index < 0 and context is not None and context.text_block:
             # No user turn to anchor to: keep the attachment data, still marked untrusted.
             messages.append(ProviderMessage(ProviderMessageRole.SYSTEM, context.text_block))
         for index, message in enumerate(request.messages):
             role = ProviderMessageRole(message.role.value)
+            # Upstream may store an assistant turn with empty content (artifact-only reply). A
+            # provider rejects empty messages, so substitute a harmless placeholder to keep the
+            # conversation coherent without dropping history.
+            safe_content = message.content.strip() if message.content else ""
+            if not safe_content:
+                safe_content = "(空消息)"
             if index != last_user_index or context is None:
-                messages.append(ProviderMessage(role, message.content))
+                messages.append(ProviderMessage(role, safe_content))
                 continue
             if context.text_block:
                 messages.append(ProviderMessage(ProviderMessageRole.SYSTEM, context.text_block))
             if context.image_parts:
                 messages.append(
-                    ProviderMessage(role, (TextPart(message.content), *context.image_parts))
+                    ProviderMessage(role, (TextPart(safe_content), *context.image_parts))
                 )
             else:
-                messages.append(ProviderMessage(role, message.content))
+                messages.append(ProviderMessage(role, safe_content))
         return tuple(messages)
 
     def _resolve_model(self, request: ChatRequest) -> str:

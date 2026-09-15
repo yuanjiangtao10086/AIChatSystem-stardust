@@ -3,6 +3,7 @@ package com.example.stardust_springboot.ai.stream;
 import com.example.stardust_springboot.ai.entity.AiModel;
 import com.example.stardust_springboot.ai.attachment.ChatAttachment;
 import com.example.stardust_springboot.ai.attachment.ChatAttachmentResolver;
+import com.example.stardust_springboot.ai.gateway.AiGatewayMessage;
 import com.example.stardust_springboot.ai.gateway.AiGatewayRequest;
 import com.example.stardust_springboot.ai.repository.AiModelRepository;
 import com.example.stardust_springboot.ai.request.AiRequestLog;
@@ -118,7 +119,7 @@ public class AiStreamPersistenceService {
         // on the HTTP request thread (it would block the SSE response and hold the conversation FOR UPDATE
         // lock). We therefore estimate from the local-only context (system + summary + memory + recent +
         // current); the worker later builds the full context with RAG. The estimate is conservative.
-        List<AiGatewayRequest.AiGatewayMessage> quotaContext = contextBuilder.buildForTokenEstimate(
+        List<AiGatewayMessage> quotaContext = contextBuilder.buildForTokenEstimate(
                 userMessage, model);
         return reserveUsage(new PreparedAiStream(requestId, principal.id(), conversation.getId(),
                 assistantMessage.getId(), requestLog.getId(), conversation.getPublicId(),
@@ -254,7 +255,7 @@ public class AiStreamPersistenceService {
      */
     private PreparedAiStream reserveUsage(PreparedAiStream stream, AiModel model) {
         int promptTokens = 0;
-        for (AiGatewayRequest.AiGatewayMessage message : stream.messages()) {
+        for (AiGatewayMessage message : stream.messages()) {
             promptTokens += tokenCounter.countMessage(message.role(), message.content());
         }
         // Attachment content is read on the worker thread, after this transaction. Reserve a
@@ -314,7 +315,7 @@ public class AiStreamPersistenceService {
     private PreparedAiStream prepared(AuthenticatedUser principal, Conversation conversation,
                                       ChatMessage userMessage, ChatMessage assistantMessage,
                                       AiRequestLog requestLog, AiModel model, String operation,
-                                      List<AiGatewayRequest.AiGatewayMessage> context) {
+                                      List<AiGatewayMessage> context) {
         // Regenerate and edit-and-resend answer the user message stored on the stream, so their
         // attachments are the ones attached to that message — they are never dropped silently.
         return new PreparedAiStream(requestLog.getRequestId(), principal.id(), conversation.getId(),
@@ -337,7 +338,7 @@ public class AiStreamPersistenceService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
         AiModel model = modelRepository.findEnabledChatModel(stream.modelId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
-        List<AiGatewayRequest.AiGatewayMessage> messages =
+        List<AiGatewayMessage> messages =
                 contextBuilder.build(userMessage, model, stream.requestId());
         // File bytes are read here, on the streaming worker, never on the HTTP request thread.
         List<ChatAttachment> attachments =

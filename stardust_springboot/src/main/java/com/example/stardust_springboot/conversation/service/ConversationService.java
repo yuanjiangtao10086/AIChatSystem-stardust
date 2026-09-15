@@ -18,8 +18,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
+
 import java.text.Normalizer;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class ConversationService {
@@ -83,6 +87,27 @@ public class ConversationService {
         Conversation conversation = requireOwned(conversationId, principal.id());
         conversation.softDelete();
         conversationRepository.saveAndFlush(conversation);
+    }
+
+    /**
+     * Deletes many owned conversations, one transaction per id. A failure on one id is reported in
+     * {@link BatchDeleteResult#failures()} and does not roll back the others.
+     */
+    public BatchDeleteResult batchDelete(AuthenticatedUser principal, List<String> ids) {
+        long deleted = 0;
+        List<BatchDeleteResult.BatchDeleteFailure> failures = new ArrayList<>();
+        for (String id : ids) {
+            try {
+                delete(principal, id);
+                deleted++;
+            } catch (BusinessException error) {
+                failures.add(new BatchDeleteResult.BatchDeleteFailure(
+                        id, String.valueOf(error.getErrorCode().code()), error.getMessage()));
+            } catch (Exception error) {
+                failures.add(new BatchDeleteResult.BatchDeleteFailure(id, "UNEXPECTED", error.getMessage()));
+            }
+        }
+        return BatchDeleteResult.of(deleted, failures);
     }
 
     /**

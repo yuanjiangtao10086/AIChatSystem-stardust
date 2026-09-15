@@ -58,6 +58,11 @@
         :files="message.attachments"
       />
 
+      <ChatArtifactList
+        v-if="message.artifacts?.length"
+        :artifacts="message.artifacts"
+      />
+
       <div class="message-actions">
         <button type="button" @click="copy">
           {{ copied ? "已复制" : "复制" }}
@@ -93,6 +98,7 @@ import { ChatMessage as Message } from "@/types/conversation";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import StreamingCursor from "./StreamingCursor.vue";
 import MessageAttachments from "./MessageAttachments.vue";
+import ChatArtifactList from "./ChatArtifactList.vue";
 
 const STATUS_LABELS: Record<string, string> = {
   streaming: "生成中",
@@ -104,7 +110,12 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default defineComponent({
   name: "ChatMessage",
-  components: { ChatMarkdown, StreamingCursor, MessageAttachments },
+  components: {
+    ChatMarkdown,
+    StreamingCursor,
+    MessageAttachments,
+    ChatArtifactList,
+  },
   props: {
     message: { type: Object as PropType<Message>, required: true },
     initials: { type: String, default: "我" },

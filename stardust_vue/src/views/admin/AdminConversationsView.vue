@@ -16,9 +16,24 @@
       <input v-model="from" type="date" class="admin-date" @change="reload" />
       <span class="admin-date-sep">至</span>
       <input v-model="to" type="date" class="admin-date" @change="reload" />
+      <div v-if="selectedIds.length" class="batch-inline">
+        <span>已选 {{ selectedIds.length }} 个会话</span>
+        <button type="button" :disabled="busy" @click="clearSelection">
+          取消选择
+        </button>
+        <button
+          type="button"
+          class="row-danger"
+          :disabled="busy"
+          @click="batchRemove"
+        >
+          {{ busy ? "删除中…" : "批量删除" }}
+        </button>
+      </div>
     </div>
 
     <p v-if="error" class="admin-error">{{ error }}</p>
+    <p v-if="flash" class="admin-flash">{{ flash }}</p>
     <div v-if="loading" class="admin-loading">加载中…</div>
     <div
       v-else-if="!pageData || pageData.items.length === 0"
@@ -32,6 +47,16 @@
         <table class="admin-table">
           <thead>
             <tr>
+              <th class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="pageData.items.length > 0 && allSelected"
+                  :indeterminate.prop="someSelected && !allSelected"
+                  aria-label="全选当前页"
+                  @change="toggleAll(!allSelected)"
+                />
+              </th>
               <th>用户</th>
               <th>标题</th>
               <th>状态</th>
@@ -42,6 +67,15 @@
           </thead>
           <tbody>
             <tr v-for="c in pageData.items" :key="c.id">
+              <td class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="selectedIds.includes(c.id)"
+                  aria-label="选择会话"
+                  @change="toggle(c.id)"
+                />
+              </td>
               <td>
                 <div class="admin-user-cell">
                   <strong>{{ c.userName }}</strong>
@@ -106,11 +140,15 @@
   </div>
 </template>
 <script lang="ts">
-import { defineComponent, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineComponent, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AdminPager from "@/components/admin/AdminPager.vue";
 import AdminConfirmModal from "@/components/admin/AdminConfirmModal.vue";
-import { deleteAdminConversation, listAdminConversations } from "@/api/admin";
+import {
+  deleteAdminConversation,
+  deleteAdminConversationsBatch,
+  listAdminConversations,
+} from "@/api/admin";
 import { AdminConversation, AdminConversationPage } from "@/types/admin";
 import { formatDateTime } from "@/utils/admin";
 
@@ -140,6 +178,28 @@ export default defineComponent({
     const pageData = ref<AdminConversationPage | null>(null);
     const loading = ref(false);
     const error = ref("");
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const flash = ref("");
+    const allSelected = computed(
+      () =>
+        !!pageData.value &&
+        pageData.value.items.length > 0 &&
+        pageData.value.items.every((c) => selectedIds.value.includes(c.id))
+    );
+    const someSelected = computed(() => selectedIds.value.length > 0);
+    const toggle = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const toggleAll = (on: boolean) => {
+      if (!pageData.value) return;
+      selectedIds.value = on ? pageData.value.items.map((c) => c.id) : [];
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
 
     const toInstantStart = (d: string) => (d ? `${d}T00:00:00Z` : "");
     const toInstantEnd = (d: string) => {
@@ -223,6 +283,34 @@ export default defineComponent({
     onMounted(load);
     onUnmounted(() => window.clearTimeout(searchTimer));
 
+    const batchRemove = async () => {
+      if (!selectedIds.value.length) return;
+      if (
+        !window.confirm(
+          `确认批量软删除选中的 ${selectedIds.value.length} 个会话吗？该操作写入审计日志。`
+        )
+      )
+        return;
+      busy.value = true;
+      flash.value = "";
+      try {
+        const result = await deleteAdminConversationsBatch([
+          ...selectedIds.value,
+        ]);
+        selectedIds.value = [];
+        await load();
+        flash.value =
+          `已删除 ${result.deleted} 个会话` +
+          (result.failures.length
+            ? `，${result.failures.length} 个删除失败。`
+            : "。");
+      } catch (e) {
+        flash.value = e instanceof Error ? e.message : "批量删除失败";
+      } finally {
+        busy.value = false;
+      }
+    };
+
     return {
       search,
       userId,
@@ -243,7 +331,35 @@ export default defineComponent({
       runConfirm,
       CONV_STATUS_LABELS,
       formatDateTime,
+      selectedIds,
+      busy,
+      flash,
+      allSelected,
+      someSelected,
+      toggle,
+      toggleAll,
+      clearSelection,
+      batchRemove,
     };
   },
 });
 </script>
+<style scoped>
+.admin-flash {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid #cfe8cf;
+  border-radius: 10px;
+  color: #2f6b2f;
+  background: #eef7ee;
+  font-size: 0.78rem;
+}
+.admin-table th.col-check,
+.admin-table td.col-check {
+  width: 42px;
+  text-align: center;
+}
+.admin-toolbar .batch-inline {
+  margin-left: auto;
+}
+</style>

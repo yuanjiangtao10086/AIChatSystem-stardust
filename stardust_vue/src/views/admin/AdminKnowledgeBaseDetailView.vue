@@ -5,6 +5,7 @@
   </div>
   <div v-else class="admin-kb-detail">
     <p v-if="error" class="admin-error">{{ error }}</p>
+    <p v-if="flash" class="admin-flash">{{ flash }}</p>
     <button class="admin-back-link" type="button" @click="back">
       ← 返回知识库列表
     </button>
@@ -79,7 +80,23 @@
     </section>
 
     <section class="admin-card">
-      <h3>文档（共 {{ detail.documentCount }} 个）</h3>
+      <div class="admin-card-head">
+        <h3>文档（共 {{ detail.documentCount }} 个）</h3>
+        <div v-if="selectedIds.length" class="batch-inline">
+          <span>已选 {{ selectedIds.length }} 个文档</span>
+          <button type="button" :disabled="busy" @click="clearSelection">
+            取消选择
+          </button>
+          <button
+            type="button"
+            class="row-danger"
+            :disabled="busy"
+            @click="batchRemove"
+          >
+            {{ busy ? "删除中…" : "批量删除" }}
+          </button>
+        </div>
+      </div>
       <div v-if="detail.documents.items.length === 0" class="admin-empty">
         该知识库暂无文档。
       </div>
@@ -87,6 +104,18 @@
         <table class="admin-table">
           <thead>
             <tr>
+              <th class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="
+                    !!detail && detail.documents.items.length > 0 && allSelected
+                  "
+                  :indeterminate.prop="someSelected && !allSelected"
+                  aria-label="全选当前页"
+                  @change="toggleAll(!allSelected)"
+                />
+              </th>
               <th>文档</th>
               <th>状态</th>
               <th>分块</th>
@@ -98,6 +127,15 @@
           </thead>
           <tbody>
             <tr v-for="doc in detail.documents.items" :key="doc.id">
+              <td class="col-check">
+                <input
+                  class="ui-checkbox"
+                  type="checkbox"
+                  :checked="selectedIds.includes(doc.id)"
+                  aria-label="选择文档"
+                  @change="toggle(doc.id)"
+                />
+              </td>
               <td>
                 <div class="admin-user-cell">
                   <strong>{{ doc.filename }}</strong>
@@ -176,11 +214,12 @@
   </div>
 </template>
 <script lang="ts">
-import { defineComponent, onMounted, ref } from "vue";
+import { computed, defineComponent, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AdminConfirmModal from "@/components/admin/AdminConfirmModal.vue";
 import {
   deleteAdminDocument,
+  deleteAdminDocumentsBatch,
   getAdminKnowledgeBase,
   removeAdminVectors,
   retryAdminDocument,
@@ -217,6 +256,31 @@ export default defineComponent({
     const error = ref("");
     const notFound = ref(false);
     const busy = ref(false);
+    const selectedIds = ref<string[]>([]);
+    const flash = ref("");
+    const allSelected = computed(
+      () =>
+        !!detail.value &&
+        detail.value.documents.items.length > 0 &&
+        detail.value.documents.items.every((doc) =>
+          selectedIds.value.includes(doc.id)
+        )
+    );
+    const someSelected = computed(() => selectedIds.value.length > 0);
+    const toggle = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const toggleAll = (on: boolean) => {
+      if (!detail.value) return;
+      selectedIds.value = on
+        ? detail.value.documents.items.map((doc) => doc.id)
+        : [];
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
 
     const load = async () => {
       loading.value = true;
@@ -301,6 +365,32 @@ export default defineComponent({
       }
     };
 
+    const batchRemove = async () => {
+      if (!selectedIds.value.length) return;
+      if (
+        !window.confirm(
+          `确认批量删除选中的 ${selectedIds.value.length} 个文档吗？将同时移除分块与向量数据，该操作不可恢复并写入审计日志。`
+        )
+      )
+        return;
+      busy.value = true;
+      flash.value = "";
+      try {
+        const result = await deleteAdminDocumentsBatch([...selectedIds.value]);
+        selectedIds.value = [];
+        await load();
+        flash.value =
+          `已删除 ${result.deleted} 个文档` +
+          (result.failures.length
+            ? `，${result.failures.length} 个删除失败。`
+            : "。");
+      } catch (e) {
+        flash.value = e instanceof Error ? e.message : "批量删除失败";
+      } finally {
+        busy.value = false;
+      }
+    };
+
     onMounted(load);
 
     return {
@@ -320,7 +410,38 @@ export default defineComponent({
       BASE_STATUS_LABELS,
       DOC_STATUS_LABELS,
       formatDateTime,
+      selectedIds,
+      flash,
+      allSelected,
+      someSelected,
+      toggle,
+      toggleAll,
+      clearSelection,
+      batchRemove,
     };
   },
 });
 </script>
+<style scoped>
+.admin-flash {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid #cfe8cf;
+  border-radius: 10px;
+  color: #2f6b2f;
+  background: #eef7ee;
+  font-size: 0.78rem;
+}
+.admin-table th.col-check,
+.admin-table td.col-check {
+  width: 42px;
+  text-align: center;
+}
+.admin-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+</style>

@@ -184,6 +184,8 @@ V2 已种入 `USER`、`ADMIN`、`SUPER_ADMIN`，当前层级为 `SUPER_ADMIN > A
 
 阶段 7 V5 已实现。字段：`id`, `message_id`, `user_file_id`, `user_id`, `attachment_type`, `sort_order`, `created_at`。
 
+阶段 14 新增枚举值 `OUTPUT`（`FILE`/`IMAGE` 之外），表示助手消息关联的 AI 生成文件（Artifact）。无 schema 变更——`attachment_type` 为 `varchar(16)` 且 `@Enumerated(STRING)`，`OUTPUT` 仅追加；`chat_message_attachment` 复合外键与唯一约束不变，Service 仍要求文件属于当前用户且为 `AVAILABLE`。
+
 约束：`UNIQUE(message_id, user_file_id)`、`INDEX(message_id, sort_order, id)`、`INDEX(user_file_id, message_id)`、`INDEX(user_id, created_at, id)`。V5 先为 `chat_message(id,user_id)` 建唯一键，再用两条复合外键保证 message/file 的 `user_id` 一致；Service 仍要求文件属于当前用户且为 `AVAILABLE`。附件只是消息引用，不自动成为知识库文档。
 
 ### 5.4 `conversation_summary`（阶段 8 已落地）

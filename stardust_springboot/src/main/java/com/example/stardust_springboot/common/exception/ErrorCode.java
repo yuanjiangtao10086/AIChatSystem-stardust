@@ -25,6 +25,8 @@ public enum ErrorCode {
     EMAIL_ALREADY_EXISTS(40903, HttpStatus.CONFLICT, "email is already registered"),
     FILE_TOO_LARGE(41301, HttpStatus.CONTENT_TOO_LARGE, "file is too large"),
     FILE_TYPE_NOT_ALLOWED(41501, HttpStatus.UNSUPPORTED_MEDIA_TYPE, "file type is not allowed"),
+    ARTIFACT_TOO_LARGE(41302, HttpStatus.CONTENT_TOO_LARGE, "artifact file is too large"),
+    ARTIFACT_TYPE_NOT_ALLOWED(41502, HttpStatus.UNSUPPORTED_MEDIA_TYPE, "artifact type is not allowed"),
     RATE_LIMITED(42901, HttpStatus.TOO_MANY_REQUESTS, "request rate limit exceeded"),
     AI_QUOTA_EXCEEDED(42902, HttpStatus.TOO_MANY_REQUESTS, "AI quota exceeded"),
     STORAGE_QUOTA_EXCEEDED(42903, HttpStatus.TOO_MANY_REQUESTS, "storage quota exceeded"),

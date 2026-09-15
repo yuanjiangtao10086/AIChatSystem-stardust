@@ -2,6 +2,8 @@ package com.example.stardust_springboot.memory.controller;
 
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.common.api.ApiResult;
+import com.example.stardust_springboot.common.api.BatchDeleteRequest;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.memory.dto.*;
 import com.example.stardust_springboot.memory.entity.MemoryType;
@@ -26,4 +28,5 @@ public class MemoryController {
     @PatchMapping("/{id}") public ApiResult<MemoryView> update(@AuthenticationPrincipal AuthenticatedUser p,@PathVariable String id,@Valid @RequestBody UpdateMemoryRequest r){return ApiResult.success(service.update(p,id,r));}
     @PatchMapping("/{id}/enabled") public ApiResult<MemoryView> enabled(@AuthenticationPrincipal AuthenticatedUser p,@PathVariable String id,@Valid @RequestBody MemoryEnabledRequest r){return ApiResult.success(service.enabled(p,id,r.enabled()));}
     @DeleteMapping("/{id}") public ResponseEntity<Void> delete(@AuthenticationPrincipal AuthenticatedUser p,@PathVariable String id){service.delete(p,id);return ResponseEntity.noContent().build();}
+    @DeleteMapping("/batch") public ApiResult<BatchDeleteResult> deleteBatch(@AuthenticationPrincipal AuthenticatedUser p,@Valid @RequestBody BatchDeleteRequest r){return ApiResult.success(service.batchDelete(p,r.ids()));}
 }

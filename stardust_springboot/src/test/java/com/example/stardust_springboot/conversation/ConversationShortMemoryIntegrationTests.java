@@ -4,6 +4,7 @@ import com.example.stardust_springboot.ai.entity.AiModel;
 import com.example.stardust_springboot.ai.entity.AiProvider;
 import com.example.stardust_springboot.ai.entity.ModelType;
 import com.example.stardust_springboot.ai.entity.ProviderType;
+import com.example.stardust_springboot.ai.gateway.AiGatewayMessage;
 import com.example.stardust_springboot.ai.gateway.AiGatewayRequest;
 import com.example.stardust_springboot.ai.repository.AiModelRepository;
 import com.example.stardust_springboot.ai.repository.AiProviderRepository;
@@ -92,9 +93,9 @@ class ConversationShortMemoryIntegrationTests {
         List<ChatMessage> chain = appendCompletedChain(3, null, "short");
         ChatMessage current = chain.getLast();
 
-        List<AiGatewayRequest.AiGatewayMessage> context = contextBuilder.build(current, model);
+        List<AiGatewayMessage> context = contextBuilder.build(current, model);
 
-        assertThat(context).extracting(AiGatewayRequest.AiGatewayMessage::role)
+        assertThat(context).extracting(AiGatewayMessage::role)
                 .containsExactly("system", "user", "assistant", "user");
         assertThat(context.stream().filter(item -> item.content().equals(current.getContentText())).count())
                 .isEqualTo(1);
@@ -112,7 +113,7 @@ class ConversationShortMemoryIntegrationTests {
         assertThat(stored.getFirst().getSourceMessageCount()).isEqualTo(5);
 
         ChatMessage current = appendCompleted(MessageRole.USER, assistant, "current-user-message");
-        List<AiGatewayRequest.AiGatewayMessage> context = contextBuilder.build(current, model);
+        List<AiGatewayMessage> context = contextBuilder.build(current, model);
 
         assertThat(context).anyMatch(item -> item.content().contains("<conversation_summary>"));
         assertThat(context.stream().filter(item -> item.content().equals("current-user-message")).count())
@@ -121,7 +122,7 @@ class ConversationShortMemoryIntegrationTests {
                 .isLessThanOrEqualTo(176);
 
         ChatMessage branchCurrent = appendCompleted(MessageRole.USER, chain.getFirst(), "edited-branch-current");
-        List<AiGatewayRequest.AiGatewayMessage> branchContext = contextBuilder.build(branchCurrent, model);
+        List<AiGatewayMessage> branchContext = contextBuilder.build(branchCurrent, model);
         assertThat(branchContext).noneMatch(item -> item.content().contains("<conversation_summary>"));
         assertThat(branchContext.stream().filter(item -> item.content().equals("edited-branch-current")).count())
                 .isEqualTo(1);
@@ -186,7 +187,7 @@ class ConversationShortMemoryIntegrationTests {
                 "How should the Stardust Vue interface evolve?"
         );
 
-        List<AiGatewayRequest.AiGatewayMessage> context = contextBuilder.build(current, model);
+        List<AiGatewayMessage> context = contextBuilder.build(current, model);
 
         assertThat(context).anyMatch(item -> item.role().equals("system")
                 && item.content().contains("<user_memories>")

@@ -17,6 +17,20 @@
         <option value="disabled">已禁用</option></select
       ><button @click="load(0)">搜索</button
       ><button class="primary" @click="beginCreate">添加记忆</button>
+      <div v-if="selectedIds.length" class="batch-inline">
+        <span>已选 {{ selectedIds.length }} 条</span>
+        <button type="button" :disabled="busy" @click="clearSelection">
+          取消选择
+        </button>
+        <button
+          type="button"
+          class="danger"
+          :disabled="busy"
+          @click="batchRemove"
+        >
+          {{ busy ? "删除中…" : "批量删除" }}
+        </button>
+      </div>
     </div>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <div class="grid">
@@ -27,6 +41,15 @@
           :class="{ disabled: !memory.enabled }"
           @click="edit(memory)"
         >
+          <label class="card-check" @click.stop>
+            <input
+              class="ui-checkbox"
+              type="checkbox"
+              :checked="selectedIds.includes(memory.id)"
+              aria-label="选择记忆"
+              @change="toggleMemory(memory.id)"
+            />
+          </label>
           <div>
             <span class="type">{{ labels[memory.memoryType] }}</span
             ><span class="origin">{{
@@ -89,6 +112,7 @@ import { ApiError } from "@/api/client";
 import {
   createMemory,
   deleteMemory,
+  deleteMemoriesBatch,
   listMemories,
   setMemoryEnabled,
   updateMemory,
@@ -109,6 +133,16 @@ export default defineComponent({
       notice = ref(""),
       editingId = ref<string | null>(null),
       saving = ref(false);
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const toggleMemory = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
     const form = reactive({
       summary: "",
       content: "",
@@ -194,6 +228,31 @@ export default defineComponent({
         notice.value = describe(e);
       }
     };
+    const batchRemove = async () => {
+      if (!selectedIds.value.length) return;
+      if (
+        !confirm(
+          `确认批量删除选中的 ${selectedIds.value.length} 条记忆吗？此操作不可恢复。`
+        )
+      )
+        return;
+      busy.value = true;
+      notice.value = "";
+      try {
+        const result = await deleteMemoriesBatch([...selectedIds.value]);
+        selectedIds.value = [];
+        await load();
+        notice.value =
+          `已删除 ${result.deleted} 条记忆` +
+          (result.failures.length
+            ? `，${result.failures.length} 条删除失败。`
+            : "。");
+      } catch (e) {
+        notice.value = describe(e);
+      } finally {
+        busy.value = false;
+      }
+    };
     onMounted(() => load());
     return {
       beginCreate,
@@ -210,6 +269,11 @@ export default defineComponent({
       saving,
       search,
       toggle,
+      selectedIds,
+      busy,
+      toggleMemory,
+      clearSelection,
+      batchRemove,
     };
   },
 });
@@ -240,6 +304,7 @@ header > p:last-child {
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 32px 0 16px;
 }
@@ -289,7 +354,21 @@ header > p:last-child {
   box-shadow: 0 8px 24px rgba(13, 13, 13, 0.04);
 }
 .cards article {
+  position: relative;
   cursor: pointer;
+}
+.card-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  box-shadow: 0 1px 3px rgba(13, 13, 13, 0.08);
 }
 .cards article.disabled {
   opacity: 0.56;

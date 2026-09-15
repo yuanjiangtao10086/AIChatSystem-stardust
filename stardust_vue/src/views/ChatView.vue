@@ -19,6 +19,7 @@
         @update:search-mode="onSearchModeChange"
         @open-hit="chat.openSearchHit"
         @close="chat.sidebarOpen.value = false"
+        @refresh="chat.loadConversations()"
     /></template>
     <ChatHeader
       :title="chat.conversation.value?.title || '新对话'"

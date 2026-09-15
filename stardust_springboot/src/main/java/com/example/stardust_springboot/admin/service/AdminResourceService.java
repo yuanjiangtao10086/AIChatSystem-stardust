@@ -3,6 +3,7 @@ package com.example.stardust_springboot.admin.service;
 import com.example.stardust_springboot.admin.audit.*;
 import com.example.stardust_springboot.admin.dto.AdminDtos;
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.common.exception.*;
 import com.example.stardust_springboot.conversation.dto.MessageView;
@@ -22,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -100,7 +103,7 @@ public class AdminResourceService {
     public AdminDtos.FileDetailView file(AuthenticatedUser actor,String id){
         UserFile f=requireFile(id); adminAuth.requireCanView(actor,f.getUser());
         audit.record(actor,AdminAuditAction.VIEW_USER_FILE,f.getUser(),"USER_FILE",id,null);
-        long attachmentCount=attachments.countByUserFileId(f.getId());
+        long attachmentCount=attachments.countActiveByUserFileId(f.getId());
         long documentCount=documents.countByUserFileIdAndDeletedAtIsNull(f.getId());
         return new AdminDtos.FileDetailView(f.getPublicId(),f.getUser().getPublicId(),f.getUser().getEmailNormalized(),
                 f.getUser().getDisplayName(),f.getOriginalName(),f.getDeclaredMime(),f.getDetectedMime(),f.getExtension(),
@@ -127,6 +130,30 @@ public class AdminResourceService {
         try { storage.delete(requireSafeObjectKey(deleting)); filePersistence.finishDelete(f.getUser().getId(),id); }
         catch(IOException e){ filePersistence.restoreDelete(f.getUser().getId(),id); throw new BusinessException(ErrorCode.STORAGE_ERROR); }
         audit.record(actor,AdminAuditAction.FILE_DELETE,f.getUser(),"USER_FILE",id,null);
+    }
+    /** Batch file deletion: one id per call; failures are reported per id and never abort the batch. */
+    public BatchDeleteResult batchDeleteFiles(AuthenticatedUser actor,List<String> ids){
+        long deleted=0; List<BatchDeleteResult.BatchDeleteFailure> failures=new ArrayList<>();
+        for(String id:ids){ try{ deleteFile(actor,id); deleted++; }
+            catch(BusinessException e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,String.valueOf(e.getErrorCode().code()),e.getMessage())); }
+            catch(Exception e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,"UNEXPECTED",e.getMessage())); } }
+        return BatchDeleteResult.of(deleted,failures);
+    }
+    /** Batch conversation deletion: one id per call; failures are reported per id and never abort the batch. */
+    public BatchDeleteResult batchDeleteConversations(AuthenticatedUser actor,List<String> ids){
+        long deleted=0; List<BatchDeleteResult.BatchDeleteFailure> failures=new ArrayList<>();
+        for(String id:ids){ try{ deleteConversation(actor,id); deleted++; }
+            catch(BusinessException e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,String.valueOf(e.getErrorCode().code()),e.getMessage())); }
+            catch(Exception e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,"UNEXPECTED",e.getMessage())); } }
+        return BatchDeleteResult.of(deleted,failures);
+    }
+    /** Batch knowledge-document deletion: one id per call; failures are reported per id and never abort the batch. */
+    public BatchDeleteResult batchDeleteDocuments(AuthenticatedUser actor,List<String> ids){
+        long deleted=0; List<BatchDeleteResult.BatchDeleteFailure> failures=new ArrayList<>();
+        for(String id:ids){ try{ deleteDocument(actor,id); deleted++; }
+            catch(BusinessException e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,String.valueOf(e.getErrorCode().code()),e.getMessage())); }
+            catch(Exception e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,"UNEXPECTED",e.getMessage())); } }
+        return BatchDeleteResult.of(deleted,failures);
     }
     @Transactional(readOnly=true)
     public PageResult<AdminDtos.KnowledgeBaseView> knowledgeBases(AuthenticatedUser actor,int page,int size,String userId,KnowledgeBaseStatus status,String search,String userSearch){
@@ -193,7 +220,7 @@ public class AdminResourceService {
                 d.getCreatedAt(),d.getUpdatedAt());
     }
     private UserFile requireFile(String id){return files.findByPublicIdAndDeletedAtIsNull(id).orElseThrow(()->new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));}
-    private boolean referenced(UserFile f){return attachments.existsByUserFileId(f.getId())||documents.existsByUserFileIdAndUserIdAndDeletedAtIsNull(f.getId(),f.getUser().getId());}
+    private boolean referenced(UserFile f){return attachments.existsActiveByUserFileId(f.getId())||documents.existsByUserFileIdAndUserIdAndDeletedAtIsNull(f.getId(),f.getUser().getId());}
     /** Defence in depth: the storage object key must stay a relative, non traversing path. */
     private String requireSafeObjectKey(UserFile f){
         String key=f.getObjectKey();

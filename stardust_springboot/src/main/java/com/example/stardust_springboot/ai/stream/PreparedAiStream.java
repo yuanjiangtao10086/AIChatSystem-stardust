@@ -1,5 +1,6 @@
 package com.example.stardust_springboot.ai.stream;
 
+import com.example.stardust_springboot.ai.gateway.AiGatewayMessage;
 import com.example.stardust_springboot.ai.gateway.AiGatewayRequest;
 
 import java.util.List;
@@ -17,7 +18,7 @@ public record PreparedAiStream(
         String providerKey,
         String externalModelId,
         String operation,
-        List<AiGatewayRequest.AiGatewayMessage> messages,
+        List<AiGatewayMessage> messages,
         long attachmentBytes
 ) {
 }

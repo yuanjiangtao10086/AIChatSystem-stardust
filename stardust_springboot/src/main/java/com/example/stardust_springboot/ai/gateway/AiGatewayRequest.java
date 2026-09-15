@@ -11,7 +11,4 @@ public record AiGatewayRequest(String requestId, String providerKey, String mode
                             List<AiGatewayMessage> messages) {
         this(requestId, providerKey, model, messages, List.of());
     }
-
-    public record AiGatewayMessage(String role, String content) {
-    }
 }

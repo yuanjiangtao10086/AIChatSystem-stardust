@@ -11,6 +11,7 @@ import {
   StorageUsage,
   UserFile,
 } from "@/types/file";
+import { BatchDeleteResult } from "@/types/batch";
 
 export function listFiles(query: FileQuery = {}): Promise<FilePage> {
   const params = new URLSearchParams({
@@ -45,6 +46,13 @@ export function renameFile(id: string, name: string): Promise<UserFile> {
 export function deleteFile(id: string): Promise<void> {
   return apiRequest(`/api/v1/files/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+export function deleteFilesBatch(ids: string[]): Promise<BatchDeleteResult> {
+  return apiRequest("/api/v1/files/batch", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
   });
 }
 

@@ -20,7 +20,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -36,12 +38,13 @@ public class AiStreamingService {
     private final AiServiceProperties properties;
     private final ConversationSummaryService summaryService;
     private final MemoryService memoryService;
+    private final MessageArtifactService artifactService;
 
     public AiStreamingService(AiStreamPersistenceService persistence, AiGateway gateway,
                               ActiveStreamRegistry registry, ExecutorService aiStreamExecutor,
                               AiServiceProperties properties,
                               ConversationSummaryService summaryService,
-                              MemoryService memoryService) {
+                              MemoryService memoryService, MessageArtifactService artifactService) {
         this.persistence = persistence;
         this.gateway = gateway;
         this.registry = registry;
@@ -49,6 +52,7 @@ public class AiStreamingService {
         this.properties = properties;
         this.summaryService = summaryService;
         this.memoryService = memoryService;
+        this.artifactService = artifactService;
     }
 
     public SseEmitter start(AuthenticatedUser principal, String conversationId,
@@ -101,6 +105,8 @@ public class AiStreamingService {
         StringBuilder content = new StringBuilder();
         MutableUsage usage = new MutableUsage();
         MutableFinish finish = new MutableFinish();
+        Map<String, ArtifactBuffer> artifacts = new LinkedHashMap<>();
+        List<ArtifactFileView> generatedFiles = new ArrayList<>();
         try {
             persistence.markStreaming(stream);
             log.info("AI stream started requestId={} userId={} conversationId={} provider={} model={}",
@@ -126,8 +132,11 @@ public class AiStreamingService {
                     stream.providerKey(), stream.externalModelId(), context.messages(),
                     context.attachments());
             gateway.stream(gatewayRequest, cancellation,
-                    event -> handleGatewayEvent(stream, emitter, cancellation, content, usage, finish,
-                            firstDeltaNanos, pythonStartNanos, startNanos, event));
+                    event -> {
+                        cancellation.markActivity();
+                        handleGatewayEvent(stream, emitter, cancellation, content, usage, finish,
+                                firstDeltaNanos, pythonStartNanos, startNanos, artifacts, generatedFiles, event);
+                    });
 
             if (cancellation.isTimedOut()) {
                 throw new AiGatewayException("AI_TIMEOUT", "AI request timed out", true);
@@ -140,11 +149,19 @@ public class AiStreamingService {
                 persistence.complete(stream, content.toString(), finish.reason(), usage.snapshot());
                 refreshSummarySafely(stream);
                 extractMemorySafely(stream);
-                log.info("AI stream completed requestId={} status=COMPLETED totalTokens={}",
-                        stream.requestId(), usage.snapshot().totalTokens());
-                send(emitter, "done", baseEvent(stream, "done", Map.of(
-                        "status", "COMPLETED",
-                        "finishReason", finish.reason().name())), cancellation);
+                log.info("AI stream completed requestId={} status=COMPLETED totalTokens={} artifacts={}",
+                        stream.requestId(), usage.snapshot().totalTokens(), generatedFiles.size());
+                Map<String, Object> donePayload = new LinkedHashMap<>();
+                donePayload.put("status", "COMPLETED");
+                donePayload.put("finishReason", finish.reason().name());
+                if (!generatedFiles.isEmpty()) {
+                    List<Map<String, Object>> files = new ArrayList<>();
+                    for (ArtifactFileView file : generatedFiles) {
+                        files.add(file.asMap());
+                    }
+                    donePayload.put("files", files);
+                }
+                send(emitter, "done", baseEvent(stream, "done", donePayload), cancellation);
             }
         } catch (AiGatewayException error) {
             if (cancellation.isTimedOut()) {
@@ -183,8 +200,19 @@ public class AiStreamingService {
 
     private void runWatchdog(StreamCancellation cancellation) {
         try {
-            Thread.sleep(properties.requestTimeout().toMillis());
-            cancellation.timeout();
+            long timeoutMillis = properties.requestTimeout().toMillis();
+            // Poll in short slices so that any upstream activity resets the clock. A stream is
+            // killed only when no event has been seen for the whole requestTimeout window, i.e. it
+            // is genuinely stalled — not merely slow (a reasoning model can think for minutes).
+            long stepMillis = Math.max(250, Math.min(1_000L, timeoutMillis));
+            while (!cancellation.isCancelled()) {
+                Thread.sleep(stepMillis);
+                if (cancellation.idleMillis() >= timeoutMillis) {
+                    log.warn("AI stream idle exceeded requestTimeout idleMs={}", timeoutMillis);
+                    cancellation.timeout();
+                    break;
+                }
+            }
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
         }
@@ -193,7 +221,9 @@ public class AiStreamingService {
     private void handleGatewayEvent(PreparedAiStream stream, SseEmitter emitter,
                                     StreamCancellation cancellation, StringBuilder content,
                                     MutableUsage usage, MutableFinish finish, long[] firstDeltaNanos,
-                                    long[] pythonStartNanos, long startNanos, AiGatewayEvent event) {
+                                    long[] pythonStartNanos, long startNanos,
+                                    Map<String, ArtifactBuffer> artifacts,
+                                    List<ArtifactFileView> generatedFiles, AiGatewayEvent event) {
         if (log.isDebugEnabled()) {
             log.debug("[stream] spring->vue requestId={} type={}",
                     stream.requestId(), event.type());
@@ -223,6 +253,54 @@ public class AiStreamingService {
             case "error" -> send(emitter, "error", baseEvent(stream, "error", event.payload()), cancellation);
             case "citation", "tool_start", "tool_delta", "tool_done" ->
                     send(emitter, event.type(), baseEvent(stream, event.type(), event.payload()), cancellation);
+            case "artifact_start" -> {
+                String artifactId = stringOrNull(event.payload(), "artifactId");
+                if (artifactId == null) break;
+                artifacts.put(artifactId, new ArtifactBuffer(
+                        artifactId,
+                        stringOrNull(event.payload(), "filename"),
+                        stringOrNull(event.payload(), "mimeType"),
+                        stringOrNull(event.payload(), "artifactType")));
+                send(emitter, "artifact_start", baseEvent(stream, "artifact_start", event.payload()), cancellation);
+            }
+            case "artifact_delta" -> {
+                ArtifactBuffer buffer = artifacts.get(stringOrNull(event.payload(), "artifactId"));
+                if (buffer != null) {
+                    try {
+                        buffer.appendBase64(stringOrNull(event.payload(), "content"));
+                    } catch (RuntimeException ignored) {
+                        // A malformed base64 chunk is dropped; the artifact resolves on done or errors there.
+                    }
+                }
+                send(emitter, "artifact_delta", baseEvent(stream, "artifact_delta", event.payload()), cancellation);
+            }
+            case "artifact_done" -> {
+                String artifactId = stringOrNull(event.payload(), "artifactId");
+                ArtifactBuffer buffer = artifactId == null ? null : artifacts.remove(artifactId);
+                if (buffer == null) {
+                    send(emitter, "artifact_done", baseEvent(stream, "artifact_done", event.payload()), cancellation);
+                    break;
+                }
+                try {
+                    ArtifactResult result = artifactService.persist(stream, stream.userId(), buffer);
+                    Map<String, Object> done = new LinkedHashMap<>(event.payload());
+                    done.put("fileId", result.fileId());
+                    done.put("downloadUrl", result.downloadUrl());
+                    send(emitter, "artifact_done", baseEvent(stream, "artifact_done", done), cancellation);
+                    generatedFiles.add(new ArtifactFileView(result.fileId(), result.fileName(),
+                            result.mimeType(), result.size(), result.downloadUrl()));
+                } catch (Exception error) {
+                    log.warn("Artifact persist failed requestId={} artifactId={}", stream.requestId(), artifactId, error);
+                    Map<String, Object> err = new LinkedHashMap<>(event.payload());
+                    err.put("code", "ARTIFACT_GENERATION_FAILED");
+                    err.put("message", "failed to store generated artifact");
+                    send(emitter, "artifact_error", baseEvent(stream, "artifact_error", err), cancellation);
+                }
+            }
+            case "artifact_error" -> {
+                artifacts.remove(stringOrNull(event.payload(), "artifactId"));
+                send(emitter, "artifact_error", baseEvent(stream, "artifact_error", event.payload()), cancellation);
+            }
             default -> throw new AiGatewayException("AI_PROTOCOL_ERROR", "Unexpected stream event", false);
         }
     }
@@ -272,6 +350,11 @@ public class AiStreamingService {
             throw new AiGatewayException("AI_PROTOCOL_ERROR", "Invalid AI stream payload", false);
         }
         return text;
+    }
+
+    private static String stringOrNull(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        return value instanceof String text ? text : null;
     }
 
     private void safeStop(PreparedAiStream stream, String content) {

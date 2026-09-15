@@ -16,6 +16,7 @@ from app.core.settings import Settings
 from app.providers.openai_compatible.provider import OpenAICompatibleProvider
 from app.providers.registry import ProviderRegistry
 from app.schemas.common import ErrorResponse
+from app.services.artifacts.artifact_service import ArtifactService
 from app.services.chat import ChatService
 from app.services.rag import RagService
 from app.vectorstores.base import VectorStore
@@ -62,7 +63,10 @@ def create_app(
     )
     application.state.settings = resolved_settings
     application.state.provider_registry = resolved_registry
-    application.state.chat_service = ChatService(resolved_registry, resolved_settings)
+    application.state.artifact_service = ArtifactService(resolved_settings)
+    application.state.chat_service = ChatService(
+        resolved_registry, resolved_settings, application.state.artifact_service
+    )
     application.state.vector_store = vector_store or SQLiteVectorStore(
         resolved_settings.rag_vector_store_path
     )
@@ -86,7 +90,7 @@ def create_app(
             }
             for item in error.errors()
         ]
-        logger.warning("schema validation failed field_count=%d", len(details))
+        logger.warning("schema validation failed field_count=%d details=%s", len(details), details)
         return error_response(
             422,
             "SCHEMA_VALIDATION_ERROR",

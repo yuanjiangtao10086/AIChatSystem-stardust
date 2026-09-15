@@ -37,12 +37,21 @@ public class FileTypePolicy {
             Map.entry("json", Set.of("application/json", "text/json", "text/plain")),
             Map.entry("docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
             Map.entry("xlsx", Set.of("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
-            Map.entry("pptx", Set.of("application/vnd.openxmlformats-officedocument.presentationml.presentation")));
+            Map.entry("pptx", Set.of("application/vnd.openxmlformats-officedocument.presentationml.presentation")),
+            Map.entry("py", Set.of("text/x-python")),
+            Map.entry("html", Set.of("text/html")),
+            Map.entry("htm", Set.of("text/html")),
+            Map.entry("sql", Set.of("application/sql", "text/x-sql")),
+            Map.entry("yaml", Set.of("text/yaml", "application/yaml")),
+            Map.entry("yml", Set.of("text/yaml", "application/yaml")),
+            Map.entry("xml", Set.of("application/xml", "text/xml")));
 
     private final long maxFileBytes;
+    private final long artifactMaxBytes;
 
     public FileTypePolicy(StorageProperties properties) {
         this.maxFileBytes = properties.maxFileBytes();
+        this.artifactMaxBytes = properties.artifactMaxBytes();
     }
 
     public ValidatedUpload validate(MultipartFile file) {
@@ -83,6 +92,33 @@ public class FileTypePolicy {
         return name;
     }
 
+    /** Validates an AI-generated artifact supplied by the Python service as raw bytes. */
+    public ValidatedUpload validateGenerated(String originalName, String declaredMime, byte[] content) {
+        if (content == null || content.length == 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        if (content.length > artifactMaxBytes) {
+            throw new BusinessException(ErrorCode.ARTIFACT_TOO_LARGE);
+        }
+        String name = normalizeName(originalName);
+        String ext = extension(name);
+        String declared = normalizeMime(declaredMime);
+        Set<String> allowedMimes = MIME_BY_EXTENSION.get(ext);
+        if (allowedMimes == null || !allowedMimes.contains(declared)) {
+            throw new BusinessException(ErrorCode.ARTIFACT_TYPE_NOT_ALLOWED);
+        }
+        // Re-sniff the bytes so a forged MIME / extension cannot smuggle a disallowed payload in.
+        // For text types the content must be valid UTF-8; for office types it must carry the OOXML
+        // magic header. A mismatch means the declared type is not what the bytes actually are.
+        String detected = detect(ext, content, declared);
+        if (!detected.equals(declared)) {
+            throw new BusinessException(ErrorCode.ARTIFACT_TYPE_NOT_ALLOWED);
+        }
+        String sha256 = digestBytes(content);
+        return new ValidatedUpload(name, ext, declared, detected, content.length, sha256,
+                "{\"category\":\"document\",\"previewable\":false,\"source\":\"ai\"}");
+    }
+
     private String normalizeName(String raw) {
         if (raw == null) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         String leaf = raw.replace('\\', '/');
@@ -116,7 +152,7 @@ public class FileTypePolicy {
             case "webp" -> bytes.length >= 12 && ascii(bytes, "RIFF") && asciiAt(bytes, 8, "WEBP");
             case "pdf" -> ascii(bytes, "%PDF-");
             case "docx", "xlsx", "pptx" -> starts(bytes, 0x50, 0x4b, 0x03, 0x04);
-            case "txt", "md", "csv", "json" -> isUtf8Text(bytes);
+            case "txt", "md", "csv", "json", "py", "html", "sql", "yaml", "xml", "htm", "yml" -> isUtf8Text(bytes);
             default -> false;
         };
         if (!valid) throw new BusinessException(ErrorCode.FILE_TYPE_NOT_ALLOWED);
@@ -130,6 +166,15 @@ public class FileTypePolicy {
                 input.transferTo(OutputStreamSink.INSTANCE);
             }
             return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private String digestBytes(byte[] bytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(bytes));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }

@@ -1,6 +1,7 @@
 package com.example.stardust_springboot.knowledge.service;
 
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.exception.BusinessException;
 import com.example.stardust_springboot.common.exception.ErrorCode;
 import com.example.stardust_springboot.file.storage.StorageService;
@@ -20,7 +21,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 
 @Service
 public class KnowledgeDocumentService {
@@ -100,6 +103,27 @@ public class KnowledgeDocumentService {
                 // Vector cleanup is idempotent and may be retried by a future reconciliation job.
             }
         }
+    }
+
+    /**
+     * Deletes many documents, one per id. A failure on one id is reported in
+     * {@link BatchDeleteResult#failures()} and does not roll back the others.
+     */
+    public BatchDeleteResult batchDelete(AuthenticatedUser principal, List<String> ids) {
+        long deleted = 0;
+        List<BatchDeleteResult.BatchDeleteFailure> failures = new ArrayList<>();
+        for (String id : ids) {
+            try {
+                delete(principal, id);
+                deleted++;
+            } catch (BusinessException error) {
+                failures.add(new BatchDeleteResult.BatchDeleteFailure(
+                        id, String.valueOf(error.getErrorCode().code()), error.getMessage()));
+            } catch (Exception error) {
+                failures.add(new BatchDeleteResult.BatchDeleteFailure(id, "UNEXPECTED", error.getMessage()));
+            }
+        }
+        return BatchDeleteResult.of(deleted, failures);
     }
 
     public KnowledgeDocumentView removeVectors(AuthenticatedUser principal, String documentId) {

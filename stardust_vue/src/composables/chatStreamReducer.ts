@@ -160,6 +160,63 @@ export function applyStreamEvent(
       assistant.completionTokens = event.completionTokens ?? 0;
       assistant.totalTokens = event.totalTokens ?? 0;
       break;
+    case "artifact_start": {
+      const artifacts = (assistant.artifacts ??= []);
+      artifacts.push({
+        artifactId: event.artifactId ?? null,
+        filename: event.filename ?? "file",
+        mimeType: event.mimeType ?? "",
+        artifactType: event.artifactType ?? null,
+        size: typeof event.size === "number" ? event.size : 0,
+        fileId: null,
+        downloadUrl: null,
+        status: "generating",
+        error: null,
+      });
+      break;
+    }
+    case "artifact_delta":
+      // The server buffers the base64 body; the UI only needs the generating state.
+      break;
+    case "artifact_done": {
+      const artifacts = assistant.artifacts ?? (assistant.artifacts = []);
+      const target = event.artifactId
+        ? artifacts.find((a) => a.artifactId === event.artifactId)
+        : artifacts[artifacts.length - 1];
+      if (target) {
+        target.status = "ready";
+        target.fileId = event.fileId ?? null;
+        target.downloadUrl = event.downloadUrl ?? null;
+        if (event.filename) target.filename = event.filename;
+        if (event.mimeType) target.mimeType = event.mimeType;
+        if (typeof event.size === "number") target.size = event.size;
+        if (event.sha256) target.sha256 = event.sha256;
+      }
+      break;
+    }
+    case "artifact_error": {
+      const artifacts = assistant.artifacts ?? (assistant.artifacts = []);
+      const target = event.artifactId
+        ? artifacts.find((a) => a.artifactId === event.artifactId)
+        : undefined;
+      if (target) {
+        target.status = "error";
+        target.error = { code: event.code, message: event.message };
+      } else {
+        artifacts.push({
+          artifactId: event.artifactId ?? null,
+          filename: "",
+          mimeType: "",
+          artifactType: null,
+          size: 0,
+          fileId: null,
+          downloadUrl: null,
+          status: "error",
+          error: { code: event.code, message: event.message },
+        });
+      }
+      break;
+    }
     case "done":
       assistant.content = event.content || assistant.content;
       assistant.status = event.status === "STOPPED" ? "STOPPED" : "COMPLETED";

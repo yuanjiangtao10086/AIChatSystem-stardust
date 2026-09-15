@@ -56,6 +56,15 @@ public class ChatMessageAttachment {
                 ? AttachmentType.IMAGE : AttachmentType.FILE;
     }
 
+    public ChatMessageAttachment(ChatMessage message, UserFile file, AppUser user, int sortOrder,
+                                 AttachmentType attachmentType) {
+        this.message = message;
+        this.userFile = file;
+        this.user = user;
+        this.sortOrder = sortOrder;
+        this.attachmentType = attachmentType;
+    }
+
     public ChatMessage getMessage() { return message; }
     public UserFile getUserFile() { return userFile; }
     public AttachmentType getAttachmentType() { return attachmentType; }

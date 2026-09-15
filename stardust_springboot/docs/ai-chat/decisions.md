@@ -454,6 +454,12 @@
 - 原因：管理端「对话 / 文件 / 知识库」详情统一报 `HTTP 500 / 50002 persistence operation failed`，而列表与用户详情正常。差异只有一项——这三个详情在 `readOnly = true` 事务里写入审计行。另一路独立故障是 `@Enumerated(STRING)` 遇到 `V9/V11` 时期写入的 `CONVERSATION_VIEW` 会抛 `IllegalArgumentException`，被 `GlobalExceptionHandler` 包成 50002，表现为「审计日志页打不开」，与枚举不匹配毫无关联性。
 - 后果：审计写入与业务读取在同一可写事务内提交，语义明确；单个无法识别的历史动作值不再能让整张审计表不可读（降级为 `LEGACY`，前端标签表回落显示原始值）。新增审计写入的读取接口必须使用可写事务。`LEGACY` 只能由数据驱动产生，应用代码不得写入。前端 `AUDIT_ACTION_LABELS` 可补 `LEGACY: 历史动作`。
 
+## ADR-065：AI 生成文件（Artifact）走 tool calling，不入可见正文
+
+- 决策：AI 生成文件（.py/.md/.txt/.json/.csv/.html/.sql/.yaml/.xml/.docx/.pptx/.xlsx）由 LLM 通过 OpenAI 兼容 `create_artifact` function tool 触发。Python `ChatService` 在文本流结束后累加 `tool_calls` 并统一生成文件，再经 `artifact_start/delta/done/error` SSE 回传；任何文件内容都不得进入助手可见正文。不支持 tool calling 的 Provider 不产生 artifact，聊天流程不受影响（不进 JSON 协议兜底，保持 Provider 无关与可测）。
+- 原因：(1) function-calling 是 OpenAI 兼容接口的事实标准，跨 Provider 可移植、可在 Python 用纯文本断言测试生成，无需 mock LLM 或二进制；(2) 把内容塞进可见正文会污染对话、破坏消息持久化与重新生成，也不利于前端渲染卡片；(3) Office 文件内容无法以“文本”安全表达，必须靠程序库生成，tool schema 只传元数据+文本内容，体积可控；(4) 生成归属 Spring：Python 只负责“生成与回传”，落盘、配额、权限、下载仍由 Spring 的 `StorageService` / `user_file` 负责（ADR-003 边界延续）。
+- 后果：`stardust_ai/app/services/artifacts/` 新增 `ArtifactService`+`ArtifactGenerator` 工厂（文本类直接包装，Office 类用 python-docx/python-pptx/openpyxl 生成且禁用宏）；`artifact_max_bytes=10MB` 双重限制；Spring `JdkHttpAiGateway` 登记 4 个 artifact 事件，`AiStreamingService` 在 `artifact_done` 调 `MessageArtifactService.persist` 二次校验（重新 sniff 字节，禁止伪造 MIME/扩展名）→ 储备配额 → Storage 写入 → 建 `user_file`(AVAILABLE) → 建 `chat_message_attachment`(type=OUTPUT)；生成失败只发 `artifact_error`，消息仍 `done`。`artifactType` 字段用于避免与根级 `type` 冲突。下载复用 `GET /api/v1/files/{id}/download`（owner 校验）。不支持 tool 的 Provider 自动降级为无 artifact。
+
 ## 待决事项
 
 以下问题不阻塞阶段 0，但必须在相应阶段进入新 ADR：

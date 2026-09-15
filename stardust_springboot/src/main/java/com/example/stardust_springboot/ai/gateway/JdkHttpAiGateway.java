@@ -26,7 +26,8 @@ import java.util.function.Consumer;
 public class JdkHttpAiGateway implements AiGateway {
     private static final Set<String> EVENTS = Set.of(
             "start", "delta", "reasoning", "usage", "done", "error",
-            "citation", "tool_start", "tool_delta", "tool_done");
+            "citation", "tool_start", "tool_delta", "tool_done",
+            "artifact_start", "artifact_delta", "artifact_done", "artifact_error");
     private static final int MAX_EVENT_CHARS = 1_000_000;
 
     private static final Logger log = LoggerFactory.getLogger(JdkHttpAiGateway.class);

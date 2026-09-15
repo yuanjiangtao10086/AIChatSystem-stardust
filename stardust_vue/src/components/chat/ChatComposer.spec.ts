@@ -14,12 +14,16 @@ const file = (id: string): FileReference => ({
 
 type SentPayload = { content: string; files: FileReference[] };
 
-const mountComposer = (onSend: (payload: SentPayload) => void, props: Record<string, unknown> = {}) =>
+const mountComposer = (
+  onSend: (payload: SentPayload) => void,
+  props: Record<string, unknown> = {}
+) =>
   mount(ChatComposer, {
     props: { modelAvailable: true, ...props },
     // 用合成 @send 监听器捕获上抛（emitted() 在本地 vitest 配置下不记录自定义事件）。
     attrs: {
-      onSend: (content: string, files: FileReference[]) => onSend({ content, files }),
+      onSend: (content: string, files: FileReference[]) =>
+        onSend({ content, files }),
     },
     global: { stubs: { ChatAttachment: true } },
   });

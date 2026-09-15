@@ -5,6 +5,7 @@ import com.example.stardust_springboot.admin.dto.AdminDtos;
 import com.example.stardust_springboot.ai.request.AiRequestLogRepository;
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
 import com.example.stardust_springboot.auth.service.RefreshTokenService;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.common.exception.BusinessException;
 import com.example.stardust_springboot.common.exception.ErrorCode;
@@ -128,6 +129,15 @@ public class AdminUserService {
         AppUser user=require(id); authorization.requireCanManage(actor,user); user.softDelete();
         refreshTokens.revokeAll(user.getId());
         audit.record(actor,AdminAuditAction.USER_DELETE,user,"USER",id,null);
+    }
+
+    /** Batch user deletion: one id per call; failures (e.g. a SUPER_ADMIN you may not manage) are reported per id and never abort the batch. */
+    public BatchDeleteResult batchDelete(AuthenticatedUser actor,List<String> ids){
+        long deleted=0; List<BatchDeleteResult.BatchDeleteFailure> failures=new ArrayList<>();
+        for(String id:ids){ try{ delete(actor,id); deleted++; }
+            catch(BusinessException e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,String.valueOf(e.getErrorCode().code()),e.getMessage())); }
+            catch(Exception e){ failures.add(new BatchDeleteResult.BatchDeleteFailure(id,"UNEXPECTED",e.getMessage())); } }
+        return BatchDeleteResult.of(deleted,failures);
     }
 
     @Transactional

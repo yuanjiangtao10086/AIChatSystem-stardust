@@ -12,6 +12,29 @@ public interface ChatMessageAttachmentRepository extends JpaRepository<ChatMessa
     boolean existsByUserFileId(Long userFileId);
     long countByUserFileId(Long userFileId);
 
+    /**
+     * Whether the file is still referenced by a live message: the message itself is not soft-deleted
+     * and its conversation is not soft-deleted. References held only by deleted conversations must
+     * not block file deletion — conversation deletion would otherwise lock referenced files forever.
+     */
+    @Query("""
+            select case when count(attachment) > 0 then true else false end
+            from ChatMessageAttachment attachment
+            where attachment.userFile.id = :userFileId
+              and attachment.message.deletedAt is null
+              and attachment.message.conversation.deletedAt is null
+            """)
+    boolean existsActiveByUserFileId(@Param("userFileId") Long userFileId);
+
+    /** Same semantics as {@link #existsActiveByUserFileId}, for reference counts shown in UIs. */
+    @Query("""
+            select count(attachment) from ChatMessageAttachment attachment
+            where attachment.userFile.id = :userFileId
+              and attachment.message.deletedAt is null
+              and attachment.message.conversation.deletedAt is null
+            """)
+    long countActiveByUserFileId(@Param("userFileId") Long userFileId);
+
     @Query("""
             select attachment from ChatMessageAttachment attachment
             join fetch attachment.userFile file

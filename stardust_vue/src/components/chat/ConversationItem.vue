@@ -1,12 +1,25 @@
 <template>
-  <router-link
-    class="conversation-item"
-    :class="{ active }"
-    :to="{ name: 'conversation', params: { conversationId: conversation.id } }"
-    @click="$emit('select')"
-    ><span class="item-title">{{ conversation.title }}</span
-    ><span class="item-meta">{{ relativeTime }}</span></router-link
-  >
+  <div class="conversation-item" :class="{ active }">
+    <label class="col-check" @click.stop>
+      <input
+        class="ui-checkbox"
+        type="checkbox"
+        :checked="selected"
+        aria-label="选择对话"
+        @change="$emit('toggle')"
+      />
+    </label>
+    <router-link
+      class="item-link"
+      :to="{
+        name: 'conversation',
+        params: { conversationId: conversation.id },
+      }"
+      @click="$emit('select')"
+      ><span class="item-title">{{ conversation.title }}</span
+      ><span class="item-meta">{{ relativeTime }}</span></router-link
+    >
+  </div>
 </template>
 <script lang="ts">
 import { computed, defineComponent, PropType } from "vue";
@@ -16,8 +29,9 @@ export default defineComponent({
   props: {
     conversation: { type: Object as PropType<Conversation>, required: true },
     active: Boolean,
+    selected: Boolean,
   },
-  emits: ["select"],
+  emits: ["select", "toggle"],
   setup(props) {
     const relativeTime = computed(() => {
       const value =
@@ -34,14 +48,26 @@ export default defineComponent({
 <style scoped>
 .conversation-item {
   display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 11px;
+  border-radius: 10px;
+  color: var(--ink);
+  transition: background 0.15s ease;
+}
+.col-check {
+  display: grid;
+  place-items: center;
+}
+.item-link {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 10px 11px;
-  border-radius: 10px;
-  color: var(--ink);
+  min-width: 0;
+  color: inherit;
   text-decoration: none;
-  transition: background 0.15s ease;
 }
 .conversation-item:hover {
   background: var(--surface-soft);

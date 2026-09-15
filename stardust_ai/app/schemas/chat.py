@@ -23,7 +23,10 @@ class AttachmentKind(StrEnum):
 
 class ChatMessage(ApiModel):
     role: ChatRole
-    content: str = Field(min_length=1, max_length=100_000)
+    # Upstream (Spring) may persist an assistant turn that produced only an artifact and no
+    # text, yielding an empty content. We tolerate that here and substitute a placeholder in
+    # _build_messages so the request still reaches the provider.
+    content: str = Field(default="", max_length=100_000)
 
 
 class ChatAttachment(ApiModel):
@@ -92,6 +95,10 @@ class StreamEvent(ApiModel):
         "tool_start",
         "tool_delta",
         "tool_done",
+        "artifact_start",
+        "artifact_delta",
+        "artifact_done",
+        "artifact_error",
     ]
     ai_request_id: str
     request_id: str

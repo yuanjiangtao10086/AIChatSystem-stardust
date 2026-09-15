@@ -10,9 +10,12 @@ import com.example.stardust_springboot.file.repository.UserFileRepository;
 import com.example.stardust_springboot.file.repository.UserStorageUsageRepository;
 import com.example.stardust_springboot.user.entity.AppUser;
 import com.example.stardust_springboot.user.repository.AppUserRepository;
+import com.example.stardust_springboot.common.id.PublicIdGenerator;
 import com.example.stardust_springboot.conversation.repository.ChatMessageAttachmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
 
 @Service
 public class FilePersistenceService {
@@ -73,11 +76,52 @@ public class FilePersistenceService {
         }
     }
 
+    /**
+     * Persists an AI-generated artifact produced by the Python service. The bytes are validated, the
+     * storage quota is reserved, and the file row is created directly in the AVAILABLE state (no
+     * two-phase upload). The caller stores the bytes via StorageService afterwards; on storage
+     * failure {@link #failGenerated} releases the quota and marks the row FAILED.
+     */
+    @Transactional
+    public UserFile persistGenerated(long userId, ValidatedUpload upload, String provider) {
+        AppUser user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+        UserStorageUsage usage = usageRepository.findForUpdate(userId)
+                .orElseGet(() -> usageRepository.saveAndFlush(new UserStorageUsage(user, defaultQuotaBytes)));
+        if (!usage.canReserve(upload.size())) {
+            throw new BusinessException(ErrorCode.STORAGE_QUOTA_EXCEEDED);
+        }
+        usage.reserve(upload.size());
+        usageRepository.save(usage);
+        String storageName = PublicIdGenerator.newUlid() + "." + upload.extension();
+        LocalDate date = LocalDate.now();
+        String objectKey = user.getPublicId() + "/" + date.getYear() + "/"
+                + "%02d".formatted(date.getMonthValue()) + "/" + storageName;
+        UserFile file = new UserFile(user, upload.name(), storageName, objectKey,
+                upload.declaredMime(), upload.detectedMime(), upload.extension(), upload.size(),
+                upload.sha256(), provider, upload.metadataJson());
+        file.markAvailable();
+        return fileRepository.saveAndFlush(file);
+    }
+
+    @Transactional
+    public void failGenerated(long userId, String fileId) {
+        UserStorageUsage usage = requireUsageForUpdate(userId);
+        UserFile file = requireOwnedForUpdate(fileId, userId);
+        if (file.getStatus() == UserFileStatus.AVAILABLE) {
+            file.markFailed();
+            usage.release(file.getSizeBytes());
+            usageRepository.save(usage);
+        }
+    }
+
     @Transactional
     public UserFile beginDelete(long userId, String fileId) {
         UserFile file = requireOwnedForUpdate(fileId, userId);
         if (file.getStatus() != UserFileStatus.AVAILABLE) throw conflict();
-        if (attachmentRepository.existsByUserFileId(file.getId())) throw conflict();
+        // Only live references block deletion: a conversation the user already deleted must not
+        // keep locking its files forever (references are cleaned up logically, not physically).
+        if (attachmentRepository.existsActiveByUserFileId(file.getId())) throw conflict();
         file.beginDelete();
         return file;
     }

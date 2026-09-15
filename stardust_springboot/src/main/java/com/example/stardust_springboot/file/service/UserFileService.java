@@ -1,6 +1,7 @@
 package com.example.stardust_springboot.file.service;
 
 import com.example.stardust_springboot.auth.security.AuthenticatedUser;
+import com.example.stardust_springboot.common.api.BatchDeleteResult;
 import com.example.stardust_springboot.common.api.PageResult;
 import com.example.stardust_springboot.common.ratelimit.EndpointRateGuard;
 import com.example.stardust_springboot.common.exception.BusinessException;
@@ -24,6 +25,8 @@ import java.io.IOException;
 import java.text.Normalizer;
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class UserFileService {
@@ -132,6 +135,28 @@ public class UserFileService {
             if (exception instanceof BusinessException business) throw business;
             throw new BusinessException(ErrorCode.STORAGE_ERROR);
         }
+    }
+
+    /**
+     * Deletes many files, one transaction per id. A failure on one id (e.g. still referenced by a
+     * knowledge document) is reported in {@link BatchDeleteResult#failures()} and does not roll back
+     * the others.
+     */
+    public BatchDeleteResult batchDelete(AuthenticatedUser principal, List<String> ids) {
+        long deleted = 0;
+        List<BatchDeleteResult.BatchDeleteFailure> failures = new ArrayList<>();
+        for (String id : ids) {
+            try {
+                delete(principal, id);
+                deleted++;
+            } catch (BusinessException error) {
+                failures.add(new BatchDeleteResult.BatchDeleteFailure(
+                        id, String.valueOf(error.getErrorCode().code()), error.getMessage()));
+            } catch (Exception error) {
+                failures.add(new BatchDeleteResult.BatchDeleteFailure(id, "UNEXPECTED", error.getMessage()));
+            }
+        }
+        return BatchDeleteResult.of(deleted, failures);
     }
 
     private UserFile requireAvailable(long userId, String fileId) {

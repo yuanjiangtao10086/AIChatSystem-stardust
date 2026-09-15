@@ -17,15 +17,32 @@
           placeholder="搜索文件"
           aria-label="搜索文件"
           @keyup.enter="load(0)" /></label
-      ><button type="button" @click="load(0)">搜索</button
-      ><span v-if="message" role="status">{{ message }}</span>
+      ><button type="button" @click="load(0)">搜索</button>
+      <div v-if="selectedIds.length" class="batch-inline">
+        <span>已选 {{ selectedIds.length }} 个</span>
+        <button type="button" :disabled="busy" @click="clearSelection">
+          取消选择
+        </button>
+        <button
+          type="button"
+          class="danger"
+          :disabled="busy"
+          @click="batchRemove"
+        >
+          {{ busy ? "删除中…" : "批量删除" }}
+        </button>
+      </div>
+      <span v-if="message" role="status">{{ message }}</span>
     </div>
     <div class="workspace-grid">
       <main>
         <FileTable
           :files="files"
           :selected-id="selected?.id"
+          :selected-ids="selectedIds"
           @select="selected = $event"
+          @toggle="toggleFile"
+          @toggle-all="toggleAll"
         />
         <nav v-if="page.totalPages > 1" class="pager" aria-label="文件分页">
           <button :disabled="page.page === 0" @click="load(page.page - 1)">
@@ -52,6 +69,7 @@ import { defineComponent, onMounted, ref } from "vue";
 import { ApiError } from "@/api/client";
 import {
   deleteFile,
+  deleteFilesBatch,
   downloadFile,
   getStorageUsage,
   listFiles,
@@ -82,6 +100,19 @@ export default defineComponent({
     const search = ref("");
     const uploading = ref(false);
     const message = ref("");
+    const selectedIds = ref<string[]>([]);
+    const busy = ref(false);
+    const toggleFile = (id: string) => {
+      const index = selectedIds.value.indexOf(id);
+      if (index >= 0) selectedIds.value.splice(index, 1);
+      else selectedIds.value.push(id);
+    };
+    const toggleAll = (on: boolean) => {
+      selectedIds.value = on ? files.value.map((item) => item.id) : [];
+    };
+    const clearSelection = () => {
+      selectedIds.value = [];
+    };
     const describe = (error: unknown) =>
       error instanceof ApiError
         ? `${error.message}${error.requestId ? ` · ${error.requestId}` : ""}`
@@ -134,12 +165,8 @@ export default defineComponent({
       }
     };
     const remove = async (file: UserFile) => {
-      if (
-        !window.confirm(
-          `确认删除 ${file.name} 吗？已被对话引用的文件无法删除。`
-        )
-      )
-        return;
+      // 引用保护由后端判定：若文件仍被存活对话/知识库引用，删除会返回 409 并在提示栏展示原因。
+      if (!window.confirm(`确认删除 ${file.name} 吗？该操作不可恢复。`)) return;
       try {
         await deleteFile(file.id);
         selected.value = null;
@@ -147,6 +174,31 @@ export default defineComponent({
         message.value = "文件已删除。";
       } catch (error) {
         message.value = describe(error);
+      }
+    };
+    const batchRemove = async () => {
+      if (!selectedIds.value.length) return;
+      if (
+        !window.confirm(
+          `确认批量删除选中的 ${selectedIds.value.length} 个文件吗？该操作不可恢复。`
+        )
+      )
+        return;
+      busy.value = true;
+      message.value = "";
+      try {
+        const result = await deleteFilesBatch([...selectedIds.value]);
+        selectedIds.value = [];
+        await load();
+        message.value =
+          `已删除 ${result.deleted} 个文件` +
+          (result.failures.length
+            ? `，${result.failures.length} 个删除失败。`
+            : "。");
+      } catch (error) {
+        message.value = describe(error);
+      } finally {
+        busy.value = false;
       }
     };
     onMounted(() => load(0));
@@ -163,6 +215,12 @@ export default defineComponent({
       upload,
       uploading,
       usage,
+      selectedIds,
+      busy,
+      toggleFile,
+      toggleAll,
+      clearSelection,
+      batchRemove,
     };
   },
 });

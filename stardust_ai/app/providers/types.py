@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 
 class ProviderMessageRole(StrEnum):
@@ -24,6 +25,20 @@ class ImagePart:
     detail: str = "auto"
 
 
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """One assistant tool invocation streamed by the provider.
+
+    ``arguments`` is the JSON string; for streamed tool calls the provider delivers it in
+    incremental fragments that the adapter concatenates before handing a complete call to
+    the chat service.
+    """
+
+    id: str
+    name: str
+    arguments: str
+
+
 ContentPart = TextPart | ImagePart
 
 
@@ -39,6 +54,7 @@ class ChatRequest:
     messages: tuple[ProviderMessage, ...]
     temperature: float | None = None
     max_output_tokens: int | None = None
+    tools: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +78,7 @@ class ChatStreamChunk:
     reasoning_content: str = ""
     finish_reason: str | None = None
     usage: TokenUsage | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

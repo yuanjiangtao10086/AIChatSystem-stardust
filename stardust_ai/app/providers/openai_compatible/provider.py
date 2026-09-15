@@ -27,6 +27,7 @@ from app.providers.types import (
     EmbeddingResult,
     ProviderMessage,
     TextPart,
+    ToolCall,
     TokenUsage,
 )
 
@@ -95,6 +96,7 @@ class OpenAICompatibleProvider(LLMProvider):
             write=self._timeout,
             pool=self._timeout,
         )
+        pending_tool_calls: dict[str, dict[str, Any]] = {}
         try:
             async with self._client.stream(
                 "POST",
@@ -118,7 +120,18 @@ class OpenAICompatibleProvider(LLMProvider):
                     data = line[5:].strip()
                     if not data or data == "[DONE]":
                         continue
-                    yield self._parse_stream_chunk(json.loads(data))
+                    parsed = json.loads(data)
+                    self._accumulate_tool_calls(parsed, pending_tool_calls)
+                    yield self._parse_stream_chunk(parsed)
+            # Tool calls stream as incremental JSON fragments across chunks; emit them as
+            # one terminal chunk so the chat service receives complete arguments.
+            if pending_tool_calls:
+                yield ChatStreamChunk(
+                    tool_calls=tuple(
+                        ToolCall(tc["id"], tc["name"] or "create_artifact", tc["arguments"])
+                        for tc in pending_tool_calls.values()
+                    )
+                )
         except ProviderError:
             raise
         except httpx.TimeoutException as error:
@@ -177,6 +190,8 @@ class OpenAICompatibleProvider(LLMProvider):
             payload["max_tokens"] = request.max_output_tokens
         if stream:
             payload["stream_options"] = {"include_usage": True}
+        if request.tools:
+            payload["tools"] = [dict(tool) for tool in request.tools]
         return payload
 
     def _message_payload(self, message: ProviderMessage) -> dict[str, Any]:
@@ -218,6 +233,45 @@ class OpenAICompatibleProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=self._parse_usage(payload.get("usage")),
         )
+
+    def _accumulate_tool_calls(
+        self, payload: dict[str, Any], pending: dict[str, dict[str, Any]]
+    ) -> None:
+        """Merge incremental ``tool_calls`` delta fragments keyed by call id.
+
+        OpenAI delivers tool-call arguments split across multiple stream chunks. We
+        concatenate the ``arguments`` JSON fragments per call id; the complete calls are
+        emitted once the stream ends (see ``stream_chat``).
+        """
+        choices = payload.get("choices") or []
+        if not choices:
+            return
+        raw_calls = (choices[0].get("delta") or {}).get("tool_calls")
+        if not raw_calls:
+            return
+        for call in raw_calls:
+            # Only the first streamed fragment carries an ``id``; later fragments carry
+            # just the ``index`` plus argument deltas. Key by index so those fragments
+            # merge into the right call instead of being dropped.
+            index = call.get("index")
+            slot = str(index) if index is not None else (call.get("id") or "0")
+            existing = pending.get(slot)
+            if existing is None:
+                existing = {
+                    "id": call.get("id") or slot,
+                    "name": "",
+                    "arguments": "",
+                }
+                pending[slot] = existing
+            elif call.get("id") and not existing["id"]:
+                existing["id"] = call["id"]
+            function = call.get("function") or {}
+            name = function.get("name")
+            if name and not existing["name"]:
+                existing["name"] = name
+            arguments = function.get("arguments")
+            if arguments:
+                existing["arguments"] += arguments
 
     def _parse_usage(self, usage: Any) -> TokenUsage | None:
         if usage is None:

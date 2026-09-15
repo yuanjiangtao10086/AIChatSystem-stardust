@@ -1,6 +1,6 @@
 # AI Chat SaaS 架构设计
 
-> 状态：阶段 0 基线设计；阶段 2–13 已落地；阶段 13 统计聚合/共享限流/可观测性已落地；阶段 12 AI Usage/限流/对账已落地  
+> 状态：阶段 0 基线设计；阶段 2–14 已落地；阶段 14 AI 生成文件（Artifact，见 ADR-065）已落地；阶段 13 统计聚合/共享限流/可观测性已落地；阶段 12 AI Usage/限流/对账已落地  
 > 盘点日期：2026-09-07  
 > 适用目录：`stardust_vue/`、`stardust_springboot/`、`stardust_ai/`
 
@@ -261,5 +261,6 @@ Provider 选择集中在 Registry/Factory，不允许 `if model == ...` 散落�
 - Owner 阶段 11：管理员后台与审计（`admin_audit_log`、用户/会话/文件/知识库/Provider/Model/AI 请求管理、敏感读取审计与 `/admin` UI，当前已完成）。11A 用户管理、11B 聊天记录管理、11C 文件与云盘管理（列表多维筛选、详情与引用统计、受审计下载/删除、不暴露内部路径）、11D 知识库与 RAG 管理（知识库详情与统计、文档状态/分块/失败原因、重新处理、删除文档与向量，AI 操作经 Spring 中转 Python）、11E AI 服务商与模型管理（Provider/Model CRUD、启停、结构化能力与参数、同类型唯一默认模型、同服务商内排序、密钥只写不读与掩码、用户侧目录下发 `defaultModel`）、11F 总览 / 审计日志 / AI 请求日志（实时只读聚合与 24 小时逐时趋势、审计与调用日志的筛选分页、单条调用详情）均已落地，见 ADR-058、ADR-059、ADR-060、ADR-061、ADR-062。
 - Owner 阶段 12：AI 用量与额度。第一批（用量账户、ledger、reserve/settle/release 与 `/api/v1/usage`）、第二批（用户用量 UI、管理员额度字段与 `usage:adjust` 审计）、登录限流与周期对账均已落地；后续为按模型/Provider 的统计聚合、共享限流器与运维加固，必须由 Owner 另行授权并重新编号。
 - Owner 阶段 13：统计聚合（`GET /api/v1/usage/breakdown` 与 admin 全站聚合，实时来自 `ai_request_log`，按日/模型/Provider）、共享限流器（`RateLimiter` 接口 + `InMemoryRateLimiter` 默认 + `RedisRateLimiter` 可选适配器 + `X-Forwarded-For` 可信代理白名单，覆盖注册/刷新/上传/登录）、可观测性（Actuator/Prometheus 指标：限流命中与对账漂移），均已落地（见 ADR-056、ADR-057）。
+- Owner 阶段 14：AI 回答生成文件与下载（Artifact）。LLM 经 `create_artifact` function tool 触发；Python 生成文件（文本类直接包装，Office 类由 python-docx/python-pptx/openpyxl 生成，禁用宏）并经 `artifact_start/delta/done/error` SSE 回传；Spring `MessageArtifactService` 在 `artifact_done` 二次校验（重新 sniff 字节、禁止伪造 MIME/扩展名、<=10MB）→ 储备配额 → `StorageService` 落盘 → 建 `user_file`(AVAILABLE) → 建 `chat_message_attachment`(type=OUTPUT)；下载复用 `GET /api/v1/files/{id}/download`（owner 校验）。不支持 tool 的 Provider 自动降级为无 artifact（见 ADR-065）。
 
 每个阶段都必须拆成小任务，遵循阅读、修改、编译、测试、修复、记录；不得因本文已设计未来能力而提前创建全部表或空壳模块。

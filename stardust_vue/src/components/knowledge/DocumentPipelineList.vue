@@ -1,6 +1,15 @@
 <template>
   <div class="documents">
     <article v-for="document in items" :key="document.id">
+      <label class="doc-check" @click.stop>
+        <input
+          class="ui-checkbox"
+          type="checkbox"
+          :checked="selectedIds.includes(document.id)"
+          aria-label="选择文档"
+          @change="$emit('toggle', document.id)"
+        />
+      </label>
       <div class="document-icon">▤</div>
       <div class="document-copy">
         <strong>{{ document.fileName }}</strong>
@@ -69,8 +78,12 @@ export default defineComponent({
   name: "DocumentPipelineList",
   props: {
     items: { type: Array as PropType<KnowledgeDocument[]>, required: true },
+    selectedIds: {
+      type: Array as PropType<string[]>,
+      default: () => [],
+    },
   },
-  emits: ["retry", "delete"],
+  emits: ["retry", "delete", "toggle"],
   setup() {
     const stageClass = (status: KnowledgeDocumentStatus, stage: Stage) => ({
       complete: status !== "FAILED" && rank[status] >= stages.indexOf(stage),
@@ -87,13 +100,19 @@ export default defineComponent({
 }
 article {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 32px 42px minmax(0, 1fr) auto;
   gap: 14px;
   align-items: start;
   padding: 17px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
+}
+.doc-check {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  padding-top: 4px;
 }
 .document-icon {
   display: grid;
@@ -195,7 +214,7 @@ small.failed {
 }
 @media (max-width: 650px) {
   article {
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: 32px 36px minmax(0, 1fr);
   }
   .document-actions {
     grid-column: 2;

@@ -1,6 +1,7 @@
 package com.example.stardust_springboot.ai;
 
 import com.example.stardust_springboot.ai.gateway.AiGatewayEvent;
+import com.example.stardust_springboot.ai.gateway.AiGatewayMessage;
 import com.example.stardust_springboot.ai.gateway.AiGatewayRequest;
 import com.example.stardust_springboot.ai.gateway.JdkHttpAiGateway;
 import com.example.stardust_springboot.ai.gateway.StreamCancellation;
@@ -66,7 +67,7 @@ class JdkHttpAiGatewayTests {
         List<AiGatewayEvent> events = new ArrayList<>();
 
         gateway.stream(new AiGatewayRequest("ai-request-1234", "openai-compatible", "model-x",
-                        List.of(new AiGatewayRequest.AiGatewayMessage("user", "hello"))),
+                        List.of(new AiGatewayMessage("user", "hello"))),
                 new StreamCancellation(), events::add);
 
         assertThat(events).extracting(AiGatewayEvent::type).containsExactly("start", "delta", "done");
